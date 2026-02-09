@@ -44,14 +44,22 @@ type Builder struct {
 	baseGraph *GraphData
 
 	// Calibration
-	calibrator Calibrator
+	calibrator     Calibrator
+	curvatureAlpha float64
 
 	// Internal
 	channelSize int
 }
 
 func (b *Builder) Divergence(d DivergenceFunc) *Builder      { b.divergence = d; return b }
-func (b *Builder) Curvature(c CurvatureFunc) *Builder        { b.curvature = c; return b }
+func (b *Builder) Curvature(c CurvatureFunc) *Builder {
+	b.curvature = c
+	if b.curvatureAlpha == 0 {
+		b.curvatureAlpha = 0.5
+	}
+	return b
+}
+func (b *Builder) CurvatureAlpha(alpha float64) *Builder { b.curvatureAlpha = alpha; return b }
 func (b *Builder) Topology(t TopologyFunc) *Builder           { b.topology = t; return b }
 func (b *Builder) Threshold(t float64) *Builder               { b.threshold = t; return b }
 func (b *Builder) ThresholdFunc(f ThresholdFunc) *Builder     { b.thresholdFunc = f; return b }
@@ -76,6 +84,15 @@ func (b *Builder) SetLogger(l Logger) *Builder                 { b.logger = l; r
 func (b *Builder) SetStorage(s Storage) *Builder               { b.storage = s; return b }
 func (b *Builder) BaseGraph(g *GraphData) *Builder             { b.baseGraph = g; return b }
 func (b *Builder) SetCalibrator(c Calibrator) *Builder         { b.calibrator = c; return b }
+
+// WithLogger sets the structured logger.
+func (b *Builder) WithLogger(l Logger) *Builder { b.logger = l; return b }
+
+// WithStorage sets the persistence backend.
+func (b *Builder) WithStorage(s Storage) *Builder { b.storage = s; return b }
+
+// WithCalibrator sets the anomaly calibrator.
+func (b *Builder) WithCalibrator(c Calibrator) *Builder { b.calibrator = c; return b }
 func (b *Builder) ChannelSize(n int) *Builder                  { b.channelSize = n; return b }
 
 // Build validates configuration and returns a new Engine.

@@ -2,12 +2,14 @@ package itt
 
 import (
 	"fmt"
+	"io"
 	"math"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/MatheusGrego/itt-engine/analysis"
+	"github.com/MatheusGrego/itt-engine/export"
 	"github.com/MatheusGrego/itt-engine/graph"
 	"github.com/MatheusGrego/itt-engine/mvcc"
 )
@@ -16,12 +18,14 @@ import (
 type Snapshot struct {
 	version *mvcc.Version
 	config  *Builder
+	base    *graph.ImmutableGraph
 	closed  bool
 	mu      sync.Mutex
+	onClose func()
 }
 
-func newSnapshot(v *mvcc.Version, cfg *Builder) *Snapshot {
-	return &Snapshot{version: v, config: cfg}
+func newSnapshot(v *mvcc.Version, cfg *Builder, base *graph.ImmutableGraph) *Snapshot {
+	return &Snapshot{version: v, config: cfg, base: base}
 }
 
 // ID returns the snapshot identifier.
@@ -55,6 +59,9 @@ func (s *Snapshot) Close() error {
 	if s.version != nil {
 		s.version.Release()
 	}
+	if s.onClose != nil {
+		s.onClose()
+	}
 	return nil
 }
 
@@ -65,6 +72,15 @@ func (s *Snapshot) checkClosed() error {
 	return nil
 }
 
+// graphView returns the graph view to use for reads.
+// Must be called with s.mu held.
+func (s *Snapshot) graphView() analysis.GraphView {
+	if s.base != nil && s.base.NodeCount() > 0 {
+		return graph.NewUnifiedView(s.base, s.version.Graph)
+	}
+	return s.version.Graph
+}
+
 // NodeCount returns the number of nodes.
 func (s *Snapshot) NodeCount() (int, error) {
 	s.mu.Lock()
@@ -72,7 +88,7 @@ func (s *Snapshot) NodeCount() (int, error) {
 	if err := s.checkClosed(); err != nil {
 		return 0, err
 	}
-	return s.version.Graph.NodeCount(), nil
+	return s.graphView().NodeCount(), nil
 }
 
 // EdgeCount returns the number of edges.
@@ -82,7 +98,7 @@ func (s *Snapshot) EdgeCount() (int, error) {
 	if err := s.checkClosed(); err != nil {
 		return 0, err
 	}
-	return s.version.Graph.EdgeCount(), nil
+	return s.graphView().EdgeCount(), nil
 }
 
 // GetNode returns a node by ID.
@@ -92,7 +108,7 @@ func (s *Snapshot) GetNode(id string) (*graph.NodeData, bool, error) {
 	if err := s.checkClosed(); err != nil {
 		return nil, false, err
 	}
-	n, ok := s.version.Graph.GetNode(id)
+	n, ok := s.graphView().GetNode(id)
 	return n, ok, nil
 }
 
@@ -103,7 +119,7 @@ func (s *Snapshot) GetEdge(from, to string) (*graph.EdgeData, bool, error) {
 	if err := s.checkClosed(); err != nil {
 		return nil, false, err
 	}
-	e, ok := s.version.Graph.GetEdge(from, to)
+	e, ok := s.graphView().GetEdge(from, to)
 	return e, ok, nil
 }
 
@@ -114,7 +130,7 @@ func (s *Snapshot) Neighbors(nodeID string) ([]string, error) {
 	if err := s.checkClosed(); err != nil {
 		return nil, err
 	}
-	return s.version.Graph.Neighbors(nodeID), nil
+	return s.graphView().Neighbors(nodeID), nil
 }
 
 // InNeighbors returns incoming neighbor IDs.
@@ -124,7 +140,7 @@ func (s *Snapshot) InNeighbors(nodeID string) ([]string, error) {
 	if err := s.checkClosed(); err != nil {
 		return nil, err
 	}
-	return s.version.Graph.InNeighbors(nodeID), nil
+	return s.graphView().InNeighbors(nodeID), nil
 }
 
 // OutNeighbors returns outgoing neighbor IDs.
@@ -134,7 +150,7 @@ func (s *Snapshot) OutNeighbors(nodeID string) ([]string, error) {
 	if err := s.checkClosed(); err != nil {
 		return nil, err
 	}
-	return s.version.Graph.OutNeighbors(nodeID), nil
+	return s.graphView().OutNeighbors(nodeID), nil
 }
 
 // ForEachNode iterates all nodes. Return false to stop.
@@ -144,7 +160,7 @@ func (s *Snapshot) ForEachNode(fn func(*graph.NodeData) bool) error {
 	if err := s.checkClosed(); err != nil {
 		return err
 	}
-	s.version.Graph.ForEachNode(fn)
+	s.graphView().ForEachNode(fn)
 	return nil
 }
 
@@ -155,8 +171,44 @@ func (s *Snapshot) ForEachEdge(fn func(*graph.EdgeData) bool) error {
 	if err := s.checkClosed(); err != nil {
 		return err
 	}
-	s.version.Graph.ForEachEdge(fn)
+	s.graphView().ForEachEdge(fn)
 	return nil
+}
+
+// Timestamp returns the snapshot's creation time.
+func (s *Snapshot) Timestamp() (time.Time, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.checkClosed(); err != nil {
+		return time.Time{}, err
+	}
+	return s.version.Timestamp, nil
+}
+
+// Export writes the snapshot's graph in the given format to the writer.
+func (s *Snapshot) Export(format ExportFormat, w io.Writer) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.checkClosed(); err != nil {
+		return err
+	}
+
+	// Build an export-compatible view.
+	var eg export.GraphView
+	if s.base != nil && s.base.NodeCount() > 0 {
+		eg = graph.NewUnifiedView(s.base, s.version.Graph)
+	} else {
+		eg = s.version.Graph
+	}
+
+	switch format {
+	case ExportJSON:
+		return export.JSON(w, eg)
+	case ExportDOT:
+		return export.DOT(w, eg)
+	default:
+		return fmt.Errorf("%w: unsupported export format", ErrInvalidConfig)
+	}
 }
 
 // Analyze computes tension for all nodes in the snapshot.
@@ -169,6 +221,7 @@ func (s *Snapshot) Analyze() (*Results, error) {
 	}
 
 	start := time.Now()
+	gv := s.graphView()
 
 	var div analysis.DivergenceFunc = analysis.JSD{}
 	if s.config.divergence != nil {
@@ -178,25 +231,66 @@ func (s *Snapshot) Analyze() (*Results, error) {
 	}
 
 	tc := analysis.NewTensionCalculator(div)
-	tensions := tc.CalculateAll(s.version.Graph)
+	tensions := tc.CalculateAll(gv)
+
+	// Curvature (optional)
+	var edgeCurvatures map[[2]string]float64
+	if s.config.curvatureAlpha > 0 {
+		cc := analysis.NewCurvatureCalculator(s.config.curvatureAlpha)
+		edgeCurvatures = cc.CalculateAll(gv)
+	}
 
 	var results []TensionResult
 	var anomalies []TensionResult
 	var tensionValues []float64
 
-	s.version.Graph.ForEachNode(func(n *graph.NodeData) bool {
+	gv.ForEachNode(func(n *graph.NodeData) bool {
 		t := tensions[n.ID]
 		tensionValues = append(tensionValues, t)
 
-		isAnomaly := t > s.config.threshold
+		// Observe in calibrator
+		if s.config.calibrator != nil {
+			s.config.calibrator.Observe(t)
+		}
+
+		// Curvature: mean of incident edges
+		curv := 0.0
+		if edgeCurvatures != nil {
+			curvSum := 0.0
+			curvCount := 0
+			for key, c := range edgeCurvatures {
+				if key[0] == n.ID || key[1] == n.ID {
+					curvSum += c
+					curvCount++
+				}
+			}
+			if curvCount > 0 {
+				curv = curvSum / float64(curvCount)
+			}
+		}
+
+		anomaly := isAnomaly(s.config, n, t)
+
+		// Confidence: degree-based, capped at 1.0
+		confidence := 0.0
+		if n.Degree > 0 {
+			confidence = math.Min(1.0, float64(n.Degree)/10.0)
+		}
+
 		tr := TensionResult{
-			NodeID:  n.ID,
-			Tension: t,
-			Degree:  n.Degree,
-			Anomaly: isAnomaly,
+			NodeID:     n.ID,
+			Tension:    t,
+			Degree:     n.Degree,
+			Curvature:  curv,
+			Anomaly:    anomaly,
+			Confidence: confidence,
+			Components: map[string]float64{
+				"tension":   t,
+				"curvature": curv,
+			},
 		}
 		results = append(results, tr)
-		if isAnomaly {
+		if anomaly {
 			anomalies = append(anomalies, tr)
 		}
 		return true
@@ -222,7 +316,9 @@ func (s *Snapshot) AnalyzeNode(nodeID string) (*TensionResult, error) {
 		return nil, err
 	}
 
-	n, ok := s.version.Graph.GetNode(nodeID)
+	gv := s.graphView()
+
+	n, ok := gv.GetNode(nodeID)
 	if !ok {
 		return nil, ErrNodeNotFound
 	}
@@ -235,14 +331,53 @@ func (s *Snapshot) AnalyzeNode(nodeID string) (*TensionResult, error) {
 	}
 
 	tc := analysis.NewTensionCalculator(div)
-	t := tc.Calculate(s.version.Graph, nodeID)
+	t := tc.Calculate(gv, nodeID)
 
-	isAnomaly := t > s.config.threshold
+	// Observe in calibrator
+	if s.config.calibrator != nil {
+		s.config.calibrator.Observe(t)
+	}
+
+	// Curvature: mean of incident edges
+	curv := 0.0
+	if s.config.curvatureAlpha > 0 {
+		cc := analysis.NewCurvatureCalculator(s.config.curvatureAlpha)
+		curvSum := 0.0
+		curvCount := 0
+		for _, neighbor := range gv.OutNeighbors(nodeID) {
+			c := cc.Calculate(gv, nodeID, neighbor)
+			curvSum += c
+			curvCount++
+		}
+		for _, neighbor := range gv.InNeighbors(nodeID) {
+			c := cc.Calculate(gv, neighbor, nodeID)
+			curvSum += c
+			curvCount++
+		}
+		if curvCount > 0 {
+			curv = curvSum / float64(curvCount)
+		}
+	}
+
+	anomaly := isAnomaly(s.config, n, t)
+
+	// Confidence: degree-based, capped at 1.0
+	confidence := 0.0
+	if n.Degree > 0 {
+		confidence = math.Min(1.0, float64(n.Degree)/10.0)
+	}
+
 	return &TensionResult{
-		NodeID:  nodeID,
-		Tension: t,
-		Degree:  n.Degree,
-		Anomaly: isAnomaly,
+		NodeID:     nodeID,
+		Tension:    t,
+		Degree:     n.Degree,
+		Curvature:  curv,
+		Anomaly:    anomaly,
+		Confidence: confidence,
+		Components: map[string]float64{
+			"tension":   t,
+			"curvature": curv,
+		},
 	}, nil
 }
 
@@ -254,6 +389,8 @@ func (s *Snapshot) AnalyzeRegion(nodeIDs []string) (*RegionResult, error) {
 		return nil, err
 	}
 
+	gv := s.graphView()
+
 	var div analysis.DivergenceFunc = analysis.JSD{}
 	if s.config.divergence != nil {
 		if ad, ok := s.config.divergence.(analysis.DivergenceFunc); ok {
@@ -262,27 +399,72 @@ func (s *Snapshot) AnalyzeRegion(nodeIDs []string) (*RegionResult, error) {
 	}
 
 	tc := analysis.NewTensionCalculator(div)
+
+	// Curvature calculator (optional)
+	var cc *analysis.CurvatureCalculator
+	if s.config.curvatureAlpha > 0 {
+		cc = analysis.NewCurvatureCalculator(s.config.curvatureAlpha)
+	}
+
 	var nodes []TensionResult
 	var tensionValues []float64
 	anomalyCount := 0
 
 	for _, id := range nodeIDs {
-		n, ok := s.version.Graph.GetNode(id)
+		n, ok := gv.GetNode(id)
 		if !ok {
 			continue // skip missing nodes
 		}
-		t := tc.Calculate(s.version.Graph, id)
+		t := tc.Calculate(gv, id)
 		tensionValues = append(tensionValues, t)
 
-		isAnomaly := t > s.config.threshold
+		// Observe in calibrator
+		if s.config.calibrator != nil {
+			s.config.calibrator.Observe(t)
+		}
+
+		// Curvature: mean of incident edges
+		curv := 0.0
+		if cc != nil {
+			curvSum := 0.0
+			curvCount := 0
+			for _, neighbor := range gv.OutNeighbors(id) {
+				c := cc.Calculate(gv, id, neighbor)
+				curvSum += c
+				curvCount++
+			}
+			for _, neighbor := range gv.InNeighbors(id) {
+				c := cc.Calculate(gv, neighbor, id)
+				curvSum += c
+				curvCount++
+			}
+			if curvCount > 0 {
+				curv = curvSum / float64(curvCount)
+			}
+		}
+
+		anomaly := isAnomaly(s.config, n, t)
+
+		// Confidence: degree-based, capped at 1.0
+		confidence := 0.0
+		if n.Degree > 0 {
+			confidence = math.Min(1.0, float64(n.Degree)/10.0)
+		}
+
 		tr := TensionResult{
-			NodeID:  id,
-			Tension: t,
-			Degree:  n.Degree,
-			Anomaly: isAnomaly,
+			NodeID:     id,
+			Tension:    t,
+			Degree:     n.Degree,
+			Curvature:  curv,
+			Anomaly:    anomaly,
+			Confidence: confidence,
+			Components: map[string]float64{
+				"tension":   t,
+				"curvature": curv,
+			},
 		}
 		nodes = append(nodes, tr)
-		if isAnomaly {
+		if anomaly {
 			anomalyCount++
 		}
 	}
@@ -311,6 +493,30 @@ func (s *Snapshot) AnalyzeRegion(nodeIDs []string) (*RegionResult, error) {
 		AnomalyCount: anomalyCount,
 		Aggregated:   aggregated,
 	}, nil
+}
+
+// nodeFromGraph converts graph.NodeData to itt.Node for callback interfaces.
+func nodeFromGraph(n *graph.NodeData) *Node {
+	return &Node{
+		ID:        n.ID,
+		Type:      n.Type,
+		Degree:    n.Degree,
+		InDegree:  n.InDegree,
+		OutDegree: n.OutDegree,
+		FirstSeen: n.FirstSeen,
+		LastSeen:  n.LastSeen,
+	}
+}
+
+// isAnomaly checks anomaly status with priority: thresholdFunc > calibrator > static threshold.
+func isAnomaly(cfg *Builder, node *graph.NodeData, tension float64) bool {
+	if cfg.thresholdFunc != nil {
+		return cfg.thresholdFunc(nodeFromGraph(node), tension)
+	}
+	if cfg.calibrator != nil && cfg.calibrator.IsWarmedUp() {
+		return cfg.calibrator.IsAnomaly(tension)
+	}
+	return tension > cfg.threshold
 }
 
 // computeResultStats computes aggregate statistics from a slice of tension values.

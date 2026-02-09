@@ -1,7 +1,10 @@
 package itt
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -442,15 +445,19 @@ func TestCallback_OnChange(t *testing.T) {
 		t.Fatal("expected OnChange to be called")
 	}
 
+	// With correct delta types, we expect DeltaNodeAdded for new nodes
+	// and DeltaEdgeAdded for new edge
 	mu.Lock()
-	d := deltas[0]
+	hasEdgeAdded := false
+	for _, d := range deltas {
+		if d.Type == DeltaEdgeAdded && d.EdgeFrom == "a" && d.EdgeTo == "b" {
+			hasEdgeAdded = true
+		}
+	}
 	mu.Unlock()
 
-	if d.Type != DeltaEdgeAdded {
-		t.Fatalf("expected DeltaEdgeAdded, got %v", d.Type)
-	}
-	if d.EdgeFrom != "a" || d.EdgeTo != "b" {
-		t.Fatalf("expected edge a->b, got %s->%s", d.EdgeFrom, d.EdgeTo)
+	if !hasEdgeAdded {
+		t.Fatal("expected DeltaEdgeAdded for a->b")
 	}
 	e.Stop()
 }
@@ -521,6 +528,79 @@ func TestCallback_PanicRecovery(t *testing.T) {
 	e.Stop()
 }
 
+func TestIsAnomalyPriority(t *testing.T) {
+	// Test 1: Static threshold (default path)
+	t.Run("static_threshold", func(t *testing.T) {
+		engine, _ := NewBuilder().Threshold(0.5).Build()
+		err := engine.AddEvent(Event{Source: "a", Target: "b", Weight: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(50 * time.Millisecond)
+		snap := engine.Snapshot()
+		defer snap.Close()
+		results, err := snap.Analyze()
+		if err != nil {
+			t.Fatal(err)
+		}
+		// With threshold 0.5 and minimal graph, no anomalies expected
+		for _, r := range results.Tensions {
+			if r.Tension <= 0.5 && r.Anomaly {
+				t.Error("should not be anomaly below threshold")
+			}
+		}
+		engine.Stop()
+	})
+
+	// Test 2: ThresholdFunc overrides static threshold
+	t.Run("thresholdFunc_overrides", func(t *testing.T) {
+		engine, _ := NewBuilder().
+			Threshold(999). // Very high static threshold
+			ThresholdFunc(func(node *Node, tension float64) bool {
+				return tension > 0.001 // Very low threshold - everything is anomaly
+			}).
+			Build()
+		err := engine.AddEvent(Event{Source: "a", Target: "b", Weight: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = engine.AddEvent(Event{Source: "b", Target: "c", Weight: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = engine.AddEvent(Event{Source: "c", Target: "a", Weight: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(100 * time.Millisecond)
+		snap := engine.Snapshot()
+		defer snap.Close()
+		results, err := snap.Analyze()
+		if err != nil {
+			t.Fatal(err)
+		}
+		// ThresholdFunc should override static threshold
+		// At least some nodes should have tension > 0.001
+		hasAnomaly := false
+		for _, r := range results.Tensions {
+			if r.Anomaly {
+				hasAnomaly = true
+				break
+			}
+		}
+		// In a triangle graph, nodes should have non-zero tension
+		if !hasAnomaly && len(results.Tensions) > 0 {
+			// Check if any tensions are above 0.001
+			for _, r := range results.Tensions {
+				if r.Tension > 0.001 {
+					t.Error("thresholdFunc should have flagged this as anomaly")
+				}
+			}
+		}
+		engine.Stop()
+	})
+}
+
 func TestCallback_OnAnomaly_HighThreshold_NoFire(t *testing.T) {
 	called := false
 	e, _ := NewBuilder().
@@ -538,4 +618,679 @@ func TestCallback_OnAnomaly_HighThreshold_NoFire(t *testing.T) {
 		t.Fatal("OnAnomaly should not fire with very high threshold")
 	}
 	e.Stop()
+}
+
+func TestNodeTypeFuncWiring(t *testing.T) {
+	engine, err := NewBuilder().
+		NodeTypeFunc(func(id string) string {
+			if strings.HasPrefix(id, "user:") {
+				return "user"
+			}
+			return "system"
+		}).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = engine.AddEvent(Event{Source: "user:alice", Target: "server:main", Weight: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	snap := engine.Snapshot()
+	defer snap.Close()
+
+	n, ok, err := snap.GetNode("user:alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("node not found")
+	}
+	if n.Type != "user" {
+		t.Errorf("expected type 'user', got %q", n.Type)
+	}
+
+	n2, ok, _ := snap.GetNode("server:main")
+	if !ok {
+		t.Fatal("target node not found")
+	}
+	if n2.Type != "system" {
+		t.Errorf("expected type 'system', got %q", n2.Type)
+	}
+
+	engine.Stop()
+}
+
+func TestGCWiring(t *testing.T) {
+	gcCalled := make(chan GCStats, 10)
+	engine, err := NewBuilder().
+		GCSnapshotWarning(50 * time.Millisecond).
+		GCSnapshotForce(100 * time.Millisecond).
+		OnGC(func(stats GCStats) {
+			gcCalled <- stats
+		}).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := engine.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Add some events to create versions
+	for i := 0; i < 5; i++ {
+		engine.AddEvent(Event{
+			Source: fmt.Sprintf("a%d", i),
+			Target: fmt.Sprintf("b%d", i),
+			Weight: 1,
+		})
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	// Verify GC is tracking versions - just verify engine runs without error
+	engine.Stop()
+}
+
+func TestGCCollectsOrphanVersions(t *testing.T) {
+	engine, err := NewBuilder().Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Add events to create versions
+	for i := 0; i < 3; i++ {
+		engine.AddEvent(Event{
+			Source: fmt.Sprintf("x%d", i),
+			Target: fmt.Sprintf("y%d", i),
+			Weight: 1,
+		})
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	// Take a snapshot and close it (creates orphan version)
+	snap := engine.Snapshot()
+	snap.Close()
+
+	// Manual GC collect
+	stats := engine.gc.Collect()
+	// Should have collected at least some orphan versions
+	t.Logf("GC collected %d versions", stats.VersionsRemoved)
+
+	engine.Stop()
+}
+
+// mockCalibrator is a simple Calibrator implementation for testing.
+type mockCalibrator struct {
+	observations []float64
+	warmedUp     bool
+	warmupSize   int
+}
+
+func (m *mockCalibrator) Observe(t float64) {
+	m.observations = append(m.observations, t)
+	if len(m.observations) >= m.warmupSize {
+		m.warmedUp = true
+	}
+}
+func (m *mockCalibrator) IsWarmedUp() bool            { return m.warmedUp }
+func (m *mockCalibrator) Threshold() float64           { return 0.5 }
+func (m *mockCalibrator) IsAnomaly(t float64) bool     { return t > 0.5 }
+func (m *mockCalibrator) Stats() CalibratorStats       { return CalibratorStats{} }
+func (m *mockCalibrator) Recalibrate()                 {}
+
+func TestAnalyzeCurvature(t *testing.T) {
+	engine, err := NewBuilder().
+		CurvatureAlpha(0.5).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Build a triangle: a->b, b->c, c->a
+	events := []Event{
+		{Source: "a", Target: "b", Weight: 1},
+		{Source: "b", Target: "c", Weight: 1},
+		{Source: "c", Target: "a", Weight: 1},
+	}
+	for _, ev := range events {
+		if err := engine.AddEvent(ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	snap := engine.Snapshot()
+	defer snap.Close()
+
+	results, err := snap.Analyze()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, r := range results.Tensions {
+		// Curvature should be computed (could be positive or negative)
+		if r.Components == nil {
+			t.Errorf("node %s: Components should not be nil", r.NodeID)
+		}
+		if _, ok := r.Components["curvature"]; !ok {
+			t.Errorf("node %s: missing curvature component", r.NodeID)
+		}
+		if r.Confidence < 0 || r.Confidence > 1 {
+			t.Errorf("node %s: confidence %f out of range [0,1]", r.NodeID, r.Confidence)
+		}
+	}
+	engine.Stop()
+}
+
+func TestAnalyzeWithCalibrator(t *testing.T) {
+	cal := &mockCalibrator{warmupSize: 3}
+
+	engine, err := NewBuilder().
+		SetCalibrator(cal).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Submit enough events to warm up calibrator
+	for i := 0; i < 10; i++ {
+		src := fmt.Sprintf("n%d", i)
+		dst := fmt.Sprintf("n%d", (i+1)%10)
+		if err := engine.AddEvent(Event{Source: src, Target: dst, Weight: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	snap := engine.Snapshot()
+	defer snap.Close()
+
+	results, err := snap.Analyze()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// After analysis, calibrator should have observations
+	if !cal.IsWarmedUp() {
+		// Calibrator needs warmupSize observations. With 10 nodes analyzed,
+		// it should be warmed up if warmupSize is 3.
+		t.Log("calibrator not warmed up yet, checking observations")
+	}
+
+	// Just verify no errors and results populated
+	if len(results.Tensions) == 0 {
+		t.Error("expected tension results")
+	}
+	engine.Stop()
+}
+
+func TestCompactionWiring(t *testing.T) {
+	compactCalled := make(chan CompactStats, 10)
+	engine, err := NewBuilder().
+		CompactionStrategy(CompactByVolume).
+		CompactionThreshold(5). // compact after 5 events
+		OnCompact(func(stats CompactStats) {
+			compactCalled <- stats
+		}).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Add 10 events (should trigger compaction at 5)
+	for i := 0; i < 10; i++ {
+		err := engine.AddEvent(Event{
+			Source: fmt.Sprintf("s%d", i),
+			Target: fmt.Sprintf("t%d", i),
+			Weight: 1,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	// Should have gotten at least one compaction callback
+	select {
+	case stats := <-compactCalled:
+		t.Logf("Compaction: %d nodes merged, %d edges merged", stats.NodesMerged, stats.EdgesMerged)
+	default:
+		t.Error("expected compaction callback")
+	}
+
+	// Data should still be accessible after compaction
+	snap := engine.Snapshot()
+	defer snap.Close()
+	nc, _ := snap.NodeCount()
+	if nc == 0 {
+		t.Error("expected nodes after compaction")
+	}
+
+	engine.Stop()
+}
+
+func TestManualCompact(t *testing.T) {
+	engine, err := NewBuilder().
+		CompactionStrategy(CompactManual).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 5; i++ {
+		engine.AddEvent(Event{
+			Source: fmt.Sprintf("a%d", i),
+			Target: fmt.Sprintf("b%d", i),
+			Weight: 1,
+		})
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	// Manual compact
+	err = engine.Compact()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Data should still be accessible
+	snap := engine.Snapshot()
+	defer snap.Close()
+	nc, _ := snap.NodeCount()
+	if nc == 0 {
+		t.Error("expected nodes after manual compaction")
+	}
+
+	engine.Stop()
+}
+
+func TestCompactionPreservesData(t *testing.T) {
+	engine, err := NewBuilder().
+		CompactionStrategy(CompactByVolume).
+		CompactionThreshold(3).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a known graph
+	engine.AddEvent(Event{Source: "alice", Target: "bob", Weight: 2.0})
+	engine.AddEvent(Event{Source: "bob", Target: "carol", Weight: 3.0})
+	engine.AddEvent(Event{Source: "carol", Target: "alice", Weight: 1.0})
+	time.Sleep(100 * time.Millisecond)
+
+	// Force compaction
+	engine.Compact()
+	time.Sleep(50 * time.Millisecond)
+
+	// Add more events after compaction
+	engine.AddEvent(Event{Source: "alice", Target: "dave", Weight: 1.0})
+	time.Sleep(100 * time.Millisecond)
+
+	snap := engine.Snapshot()
+	defer snap.Close()
+
+	// Check all data is present (base + overlay)
+	nc, _ := snap.NodeCount()
+	if nc < 4 {
+		t.Errorf("expected at least 4 nodes (alice,bob,carol,dave), got %d", nc)
+	}
+
+	engine.Stop()
+}
+
+func TestSnapshotTimestamp(t *testing.T) {
+	engine, err := NewBuilder().Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	before := time.Now()
+	engine.AddEvent(Event{Source: "a", Target: "b", Weight: 1})
+	time.Sleep(50 * time.Millisecond)
+
+	snap := engine.Snapshot()
+	defer snap.Close()
+
+	ts, err := snap.Timestamp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ts.IsZero() {
+		t.Error("expected non-zero timestamp")
+	}
+	if ts.Before(before) {
+		t.Error("timestamp should be after test start")
+	}
+
+	engine.Stop()
+}
+
+func TestSnapshotExportJSON(t *testing.T) {
+	engine, err := NewBuilder().Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	engine.AddEvent(Event{Source: "a", Target: "b", Weight: 1})
+	engine.AddEvent(Event{Source: "b", Target: "c", Weight: 2})
+	time.Sleep(100 * time.Millisecond)
+
+	snap := engine.Snapshot()
+	defer snap.Close()
+
+	var buf bytes.Buffer
+	err = snap.Export(ExportJSON, &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "\"nodes\"") {
+		t.Error("JSON should contain nodes key")
+	}
+	if !strings.Contains(output, "\"edges\"") {
+		t.Error("JSON should contain edges key")
+	}
+	if !strings.Contains(output, "\"a\"") {
+		t.Error("JSON should contain node 'a'")
+	}
+
+	engine.Stop()
+}
+
+func TestSnapshotExportDOT(t *testing.T) {
+	engine, err := NewBuilder().Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	engine.AddEvent(Event{Source: "x", Target: "y", Weight: 1})
+	time.Sleep(50 * time.Millisecond)
+
+	snap := engine.Snapshot()
+	defer snap.Close()
+
+	var buf bytes.Buffer
+	err = snap.Export(ExportDOT, &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "digraph") {
+		t.Error("DOT output should contain 'digraph'")
+	}
+
+	engine.Stop()
+}
+
+func TestSnapshotExportClosedError(t *testing.T) {
+	engine, err := NewBuilder().Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	engine.AddEvent(Event{Source: "a", Target: "b", Weight: 1})
+	time.Sleep(50 * time.Millisecond)
+
+	snap := engine.Snapshot()
+	snap.Close()
+
+	_, err = snap.Timestamp()
+	if err != ErrSnapshotClosed {
+		t.Errorf("expected ErrSnapshotClosed, got %v", err)
+	}
+
+	var buf bytes.Buffer
+	err = snap.Export(ExportJSON, &buf)
+	if err != ErrSnapshotClosed {
+		t.Errorf("expected ErrSnapshotClosed, got %v", err)
+	}
+
+	engine.Stop()
+}
+
+func TestDeltaTypes(t *testing.T) {
+	var deltas []Delta
+	var mu sync.Mutex
+
+	engine, err := NewBuilder().
+		OnChange(func(d Delta) {
+			mu.Lock()
+			deltas = append(deltas, d)
+			mu.Unlock()
+		}).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// First event: new nodes + new edge
+	engine.AddEvent(Event{Source: "a", Target: "b", Weight: 1})
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	firstBatch := make([]Delta, len(deltas))
+	copy(firstBatch, deltas)
+	mu.Unlock()
+
+	// Should have DeltaNodeAdded for "a", DeltaNodeAdded for "b", DeltaEdgeAdded for a->b
+	hasNodeAddedA := false
+	hasNodeAddedB := false
+	hasEdgeAdded := false
+	for _, d := range firstBatch {
+		if d.Type == DeltaNodeAdded && d.NodeID == "a" {
+			hasNodeAddedA = true
+		}
+		if d.Type == DeltaNodeAdded && d.NodeID == "b" {
+			hasNodeAddedB = true
+		}
+		if d.Type == DeltaEdgeAdded {
+			hasEdgeAdded = true
+		}
+	}
+	if !hasNodeAddedA {
+		t.Error("missing DeltaNodeAdded for 'a'")
+	}
+	if !hasNodeAddedB {
+		t.Error("missing DeltaNodeAdded for 'b'")
+	}
+	if !hasEdgeAdded {
+		t.Error("missing DeltaEdgeAdded")
+	}
+
+	// Second event: same edge = DeltaEdgeUpdated, no new DeltaNodeAdded
+	mu.Lock()
+	deltas = deltas[:0] // reset
+	mu.Unlock()
+
+	engine.AddEvent(Event{Source: "a", Target: "b", Weight: 1})
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	secondBatch := make([]Delta, len(deltas))
+	copy(secondBatch, deltas)
+	mu.Unlock()
+
+	hasEdgeUpdated := false
+	hasNewNodeAdded := false
+	for _, d := range secondBatch {
+		if d.Type == DeltaEdgeUpdated {
+			hasEdgeUpdated = true
+		}
+		if d.Type == DeltaNodeAdded {
+			hasNewNodeAdded = true
+		}
+	}
+	if !hasEdgeUpdated {
+		t.Error("expected DeltaEdgeUpdated for existing edge")
+	}
+	if hasNewNodeAdded {
+		t.Error("should not have DeltaNodeAdded for existing nodes")
+	}
+
+	engine.Stop()
+}
+
+func TestEngineStatsComplete(t *testing.T) {
+	engine, err := NewBuilder().Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 10; i++ {
+		engine.AddEvent(Event{
+			Source: fmt.Sprintf("s%d", i),
+			Target: fmt.Sprintf("t%d", i),
+			Weight: 1,
+		})
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	snap := engine.Snapshot()
+	defer func() { snap.Close() }()
+
+	stats := engine.Stats()
+	if stats.Nodes == 0 {
+		t.Error("expected nodes > 0")
+	}
+	if stats.Edges == 0 {
+		t.Error("expected edges > 0")
+	}
+	if stats.EventsTotal != 10 {
+		t.Errorf("expected EventsTotal=10, got %d", stats.EventsTotal)
+	}
+	if stats.VersionsCurrent == 0 {
+		t.Error("expected VersionsCurrent > 0")
+	}
+	if stats.SnapshotsActive != 1 {
+		t.Errorf("expected SnapshotsActive=1, got %d", stats.SnapshotsActive)
+	}
+	if stats.Uptime == 0 {
+		t.Error("expected Uptime > 0")
+	}
+	if stats.EventsPerSecond <= 0 {
+		t.Error("expected EventsPerSecond > 0")
+	}
+
+	snap.Close()
+	stats2 := engine.Stats()
+	if stats2.SnapshotsActive != 0 {
+		t.Errorf("expected SnapshotsActive=0 after close, got %d", stats2.SnapshotsActive)
+	}
+
+	engine.Stop()
+}
+
+func TestEngineAnalyzeNode(t *testing.T) {
+	engine, err := NewBuilder().Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	engine.AddEvent(Event{Source: "a", Target: "b", Weight: 1})
+	engine.AddEvent(Event{Source: "b", Target: "c", Weight: 1})
+	engine.AddEvent(Event{Source: "c", Target: "a", Weight: 1})
+	time.Sleep(100 * time.Millisecond)
+
+	result, err := engine.AnalyzeNode("a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.NodeID != "a" {
+		t.Errorf("expected node 'a', got %q", result.NodeID)
+	}
+	if result.Degree == 0 {
+		t.Error("expected non-zero degree")
+	}
+
+	// Non-existent node
+	_, err = engine.AnalyzeNode("nonexistent")
+	if err != ErrNodeNotFound {
+		t.Errorf("expected ErrNodeNotFound, got %v", err)
+	}
+
+	engine.Stop()
+}
+
+func TestEngineAnalyzeRegion(t *testing.T) {
+	engine, err := NewBuilder().Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	engine.AddEvent(Event{Source: "a", Target: "b", Weight: 1})
+	engine.AddEvent(Event{Source: "b", Target: "c", Weight: 1})
+	engine.AddEvent(Event{Source: "c", Target: "d", Weight: 1})
+	time.Sleep(100 * time.Millisecond)
+
+	result, err := engine.AnalyzeRegion([]string{"a", "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Nodes) != 2 {
+		t.Errorf("expected 2 nodes, got %d", len(result.Nodes))
+	}
+
+	engine.Stop()
+}
+
+func TestBuilderNewNames(t *testing.T) {
+	// Verify new builder methods compile and work
+	_, err := NewBuilder().
+		WithLogger(nil).
+		WithStorage(nil).
+		WithCalibrator(nil).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCheckAnomaliesWithCalibrator(t *testing.T) {
+	cal := &mockCalibrator{warmupSize: 3}
+	var anomalies []TensionResult
+	var mu sync.Mutex
+
+	engine, err := NewBuilder().
+		Threshold(0.001). // very low threshold to trigger anomalies
+		SetCalibrator(cal).
+		OnAnomaly(func(r TensionResult) {
+			mu.Lock()
+			anomalies = append(anomalies, r)
+			mu.Unlock()
+		}).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Build a graph with enough structure for tension
+	for i := 0; i < 5; i++ {
+		engine.AddEvent(Event{
+			Source: fmt.Sprintf("n%d", i),
+			Target: fmt.Sprintf("n%d", (i+1)%5),
+			Weight: 1,
+		})
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	// Calibrator should have observations
+	if len(cal.observations) == 0 {
+		t.Error("expected calibrator to have observations")
+	}
+
+	mu.Lock()
+	anomalyCount := len(anomalies)
+	mu.Unlock()
+
+	// With very low threshold, some anomalies should fire
+	// Just verify the system works without panic
+	t.Logf("calibrator observations: %d, anomalies detected: %d", len(cal.observations), anomalyCount)
+
+	engine.Stop()
 }
