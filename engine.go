@@ -233,6 +233,13 @@ func (e *Engine) processEvent(ev Event) {
 	}
 }
 
+// Analyze takes a snapshot, runs analysis, and returns results.
+func (e *Engine) Analyze() (*Results, error) {
+	snap := e.Snapshot()
+	defer snap.Close()
+	return snap.Analyze()
+}
+
 func (e *Engine) safeCallback(fn func()) {
 	defer func() {
 		if r := recover(); r != nil {

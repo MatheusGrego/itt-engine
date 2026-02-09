@@ -310,3 +310,108 @@ func TestEngine_Reset(t *testing.T) {
 	}
 	e.Stop()
 }
+
+// === Analysis integration tests ===
+
+func TestSnapshot_Analyze(t *testing.T) {
+	e, _ := NewBuilder().Threshold(0.1).Build()
+	e.AddEvent(Event{Source: "hub", Target: "a"})
+	e.AddEvent(Event{Source: "hub", Target: "b"})
+	e.AddEvent(Event{Source: "hub", Target: "c"})
+	e.AddEvent(Event{Source: "a", Target: "b"})
+	time.Sleep(100 * time.Millisecond)
+
+	snap := e.Snapshot()
+	defer snap.Close()
+
+	results, err := snap.Analyze()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results.Tensions) == 0 {
+		t.Fatal("expected tension results")
+	}
+	if results.Stats.NodesAnalyzed != 4 {
+		t.Fatalf("expected 4 nodes analyzed, got %d", results.Stats.NodesAnalyzed)
+	}
+	e.Stop()
+}
+
+func TestSnapshot_AnalyzeNode(t *testing.T) {
+	e, _ := NewBuilder().Build()
+	e.AddEvent(Event{Source: "a", Target: "b"})
+	e.AddEvent(Event{Source: "a", Target: "c"})
+	time.Sleep(100 * time.Millisecond)
+
+	snap := e.Snapshot()
+	defer snap.Close()
+
+	result, err := snap.AnalyzeNode("a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.NodeID != "a" {
+		t.Fatalf("expected node a, got %s", result.NodeID)
+	}
+	if result.Tension < 0 {
+		t.Fatal("tension should be non-negative")
+	}
+	e.Stop()
+}
+
+func TestSnapshot_AnalyzeNode_NotFound(t *testing.T) {
+	e, _ := NewBuilder().Build()
+	snap := e.Snapshot()
+	defer snap.Close()
+
+	_, err := snap.AnalyzeNode("nonexistent")
+	if err != ErrNodeNotFound {
+		t.Fatalf("expected ErrNodeNotFound, got %v", err)
+	}
+}
+
+func TestSnapshot_AnalyzeRegion(t *testing.T) {
+	e, _ := NewBuilder().Build()
+	e.AddEvent(Event{Source: "a", Target: "b"})
+	e.AddEvent(Event{Source: "b", Target: "c"})
+	e.AddEvent(Event{Source: "c", Target: "a"})
+	time.Sleep(100 * time.Millisecond)
+
+	snap := e.Snapshot()
+	defer snap.Close()
+
+	result, err := snap.AnalyzeRegion([]string{"a", "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Nodes) != 2 {
+		t.Fatalf("expected 2 nodes, got %d", len(result.Nodes))
+	}
+	e.Stop()
+}
+
+func TestSnapshot_Analyze_Closed(t *testing.T) {
+	e, _ := NewBuilder().Build()
+	snap := e.Snapshot()
+	snap.Close()
+
+	_, err := snap.Analyze()
+	if err != ErrSnapshotClosed {
+		t.Fatalf("expected ErrSnapshotClosed, got %v", err)
+	}
+}
+
+func TestEngine_Analyze(t *testing.T) {
+	e, _ := NewBuilder().Build()
+	e.AddEvent(Event{Source: "a", Target: "b"})
+	time.Sleep(50 * time.Millisecond)
+
+	results, err := e.Analyze()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if results.Stats.NodesAnalyzed != 2 {
+		t.Fatalf("expected 2 nodes, got %d", results.Stats.NodesAnalyzed)
+	}
+	e.Stop()
+}
