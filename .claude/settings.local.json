@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go version:*)",
+      "Bash(git init:*)",
+      "Bash(go mod init:*)",
+      "Bash(go test:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(set CGO_ENABLED=1:*)",
+      "Bash($env:CGO_ENABLED=\"1\")",
+      "Bash(go build:*)",
+      "Bash(go vet:*)"
+    ]
+  }
+}

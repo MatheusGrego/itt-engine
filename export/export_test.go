@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mfreiregr/itt-engine/graph"
+	"github.com/MatheusGrego/itt-engine/graph"
 )
 
 // helper builds a small graph and returns an immutable snapshot.

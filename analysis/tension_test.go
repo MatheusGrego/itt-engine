@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mfreiregr/itt-engine/graph"
+	"github.com/MatheusGrego/itt-engine/graph"
 )
 
 // helper to build an immutable graph from edges.

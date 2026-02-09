@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mfreiregr/itt-engine/graph"
+	"github.com/MatheusGrego/itt-engine/graph"
 )
 
 func TestVersion_StoreAndLoad(t *testing.T) {

@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mfreiregr/itt-engine/analysis"
-	"github.com/mfreiregr/itt-engine/graph"
-	"github.com/mfreiregr/itt-engine/mvcc"
+	"github.com/MatheusGrego/itt-engine/analysis"
+	"github.com/MatheusGrego/itt-engine/graph"
+	"github.com/MatheusGrego/itt-engine/mvcc"
 )
 
 // Snapshot is a read-only, point-in-time view of the graph.

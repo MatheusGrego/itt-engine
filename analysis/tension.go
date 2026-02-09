@@ -1,6 +1,6 @@
 package analysis
 
-import "github.com/mfreiregr/itt-engine/graph"
+import "github.com/MatheusGrego/itt-engine/graph"
 
 // GraphView is what the tension calculator needs from a graph.
 type GraphView interface {

@@ -6,7 +6,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/mfreiregr/itt-engine/graph"
+	"github.com/MatheusGrego/itt-engine/graph"
 )
 
 // GraphView is a read-only graph interface for export.

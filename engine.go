@@ -6,9 +6,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/mfreiregr/itt-engine/analysis"
-	"github.com/mfreiregr/itt-engine/graph"
-	"github.com/mfreiregr/itt-engine/mvcc"
+	"github.com/MatheusGrego/itt-engine/analysis"
+	"github.com/MatheusGrego/itt-engine/graph"
+	"github.com/MatheusGrego/itt-engine/mvcc"
 )
 
 // Engine is the core ITT processing engine.

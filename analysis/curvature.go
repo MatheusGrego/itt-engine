@@ -3,7 +3,7 @@ package analysis
 import (
 	"math"
 
-	"github.com/mfreiregr/itt-engine/graph"
+	"github.com/MatheusGrego/itt-engine/graph"
 )
 
 // CurvatureCalculator computes Ollivier-Ricci curvature for edges in a graph.

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mfreiregr/itt-engine/graph"
+	"github.com/MatheusGrego/itt-engine/graph"
 )
 
 // buildImmutable is a helper that creates an ImmutableGraph from a mutable Graph.

@@ -3,7 +3,7 @@ package compact
 import (
 	"time"
 
-	"github.com/mfreiregr/itt-engine/graph"
+	"github.com/MatheusGrego/itt-engine/graph"
 )
 
 // Strategy enumerates compaction trigger types.
