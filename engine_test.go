@@ -415,3 +415,127 @@ func TestEngine_Analyze(t *testing.T) {
 	}
 	e.Stop()
 }
+
+// === Callback tests ===
+
+func TestCallback_OnChange(t *testing.T) {
+	var mu sync.Mutex
+	var deltas []Delta
+
+	e, _ := NewBuilder().
+		OnChange(func(d Delta) {
+			mu.Lock()
+			deltas = append(deltas, d)
+			mu.Unlock()
+		}).
+		Build()
+
+	e.Start(context.Background())
+	e.AddEvent(Event{Source: "a", Target: "b"})
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	count := len(deltas)
+	mu.Unlock()
+
+	if count == 0 {
+		t.Fatal("expected OnChange to be called")
+	}
+
+	mu.Lock()
+	d := deltas[0]
+	mu.Unlock()
+
+	if d.Type != DeltaEdgeAdded {
+		t.Fatalf("expected DeltaEdgeAdded, got %v", d.Type)
+	}
+	if d.EdgeFrom != "a" || d.EdgeTo != "b" {
+		t.Fatalf("expected edge a->b, got %s->%s", d.EdgeFrom, d.EdgeTo)
+	}
+	e.Stop()
+}
+
+func TestCallback_OnAnomaly(t *testing.T) {
+	var mu sync.Mutex
+	var anomalies []TensionResult
+
+	e, _ := NewBuilder().
+		Threshold(0.0). // very low threshold to trigger anomalies
+		OnAnomaly(func(r TensionResult) {
+			mu.Lock()
+			anomalies = append(anomalies, r)
+			mu.Unlock()
+		}).
+		Build()
+
+	e.Start(context.Background())
+
+	// Build a graph structure that generates tension
+	e.AddEvent(Event{Source: "hub", Target: "a"})
+	e.AddEvent(Event{Source: "hub", Target: "b"})
+	e.AddEvent(Event{Source: "hub", Target: "c"})
+	e.AddEvent(Event{Source: "a", Target: "b"})
+	time.Sleep(200 * time.Millisecond)
+
+	mu.Lock()
+	count := len(anomalies)
+	mu.Unlock()
+
+	// With threshold 0.0, any node with non-zero tension should trigger
+	if count == 0 {
+		t.Fatal("expected OnAnomaly to be called at least once")
+	}
+
+	mu.Lock()
+	for _, a := range anomalies {
+		if a.Tension < 0 {
+			t.Fatal("anomaly tension should be non-negative")
+		}
+		if !a.Anomaly {
+			t.Fatal("anomaly flag should be true")
+		}
+	}
+	mu.Unlock()
+	e.Stop()
+}
+
+func TestCallback_PanicRecovery(t *testing.T) {
+	e, _ := NewBuilder().
+		OnChange(func(d Delta) {
+			panic("intentional panic")
+		}).
+		Build()
+
+	e.Start(context.Background())
+	// Should not panic
+	err := e.AddEvent(Event{Source: "a", Target: "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	// Engine should still be running
+	if !e.Running() {
+		t.Fatal("engine should survive callback panic")
+	}
+	e.Stop()
+}
+
+func TestCallback_OnAnomaly_HighThreshold_NoFire(t *testing.T) {
+	called := false
+	e, _ := NewBuilder().
+		Threshold(999.0). // extremely high threshold
+		OnAnomaly(func(r TensionResult) {
+			called = true
+		}).
+		Build()
+
+	e.Start(context.Background())
+	e.AddEvent(Event{Source: "a", Target: "b"})
+	time.Sleep(100 * time.Millisecond)
+
+	if called {
+		t.Fatal("OnAnomaly should not fire with very high threshold")
+	}
+	e.Stop()
+}

@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/mfreiregr/itt-engine/analysis"
 	"github.com/mfreiregr/itt-engine/graph"
 	"github.com/mfreiregr/itt-engine/mvcc"
 )
@@ -231,6 +232,11 @@ func (e *Engine) processEvent(ev Event) {
 			})
 		})
 	}
+
+	// Real-time anomaly detection for dirty nodes
+	if e.config.onAnomaly != nil {
+		e.checkAnomalies(newGraph, ev, nextID)
+	}
 }
 
 // Analyze takes a snapshot, runs analysis, and returns results.
@@ -238,6 +244,43 @@ func (e *Engine) Analyze() (*Results, error) {
 	snap := e.Snapshot()
 	defer snap.Close()
 	return snap.Analyze()
+}
+
+func (e *Engine) checkAnomalies(g *graph.ImmutableGraph, ev Event, version uint64) {
+	tc := analysis.NewTensionCalculator(e.getDivergence())
+
+	for _, nodeID := range []string{ev.Source, ev.Target} {
+		t := tc.Calculate(g, nodeID)
+		isAnomaly := t > e.config.threshold
+
+		if isAnomaly {
+			node, _ := g.GetNode(nodeID)
+			degree := 0
+			if node != nil {
+				degree = node.Degree
+			}
+
+			result := TensionResult{
+				NodeID:  nodeID,
+				Tension: t,
+				Degree:  degree,
+				Anomaly: true,
+			}
+
+			e.safeCallback(func() {
+				e.config.onAnomaly(result)
+			})
+		}
+	}
+}
+
+func (e *Engine) getDivergence() analysis.DivergenceFunc {
+	if e.config.divergence != nil {
+		if ad, ok := e.config.divergence.(analysis.DivergenceFunc); ok {
+			return ad
+		}
+	}
+	return analysis.JSD{}
 }
 
 func (e *Engine) safeCallback(fn func()) {
