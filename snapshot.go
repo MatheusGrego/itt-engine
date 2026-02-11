@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"runtime"
 	"sort"
 	"sync"
 	"time"
@@ -235,7 +236,13 @@ func (s *Snapshot) Analyze() (*Results, error) {
 	}
 
 	tc := analysis.NewTensionCalculator(div)
-	tensions := tc.CalculateAll(gv)
+
+	// Use parallel analysis for large graphs (auto-fallback to sequential for < 100 nodes)
+	workers := runtime.NumCPU()
+	if s.config.parallelWorkers > 0 {
+		workers = s.config.parallelWorkers
+	}
+	tensions := analysis.CalculateAllParallel(tc, gv, workers)
 
 	// Curvature (optional)
 	var edgeCurvatures map[[2]string]float64

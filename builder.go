@@ -56,6 +56,9 @@ type Builder struct {
 	onTensionSpike        func(nodeID string, delta float64)
 	tensionSpikeThreshold float64
 
+	// Performance
+	parallelWorkers int // number of goroutines for parallel analysis (0 = auto-detect)
+
 	// Internal
 	channelSize int
 }
@@ -137,6 +140,14 @@ func (b *Builder) TensionSpikeThreshold(t float64) *Builder {
 }
 
 func (b *Builder) ChannelSize(n int) *Builder { b.channelSize = n; return b }
+
+// WithParallelWorkers sets the number of goroutines for parallel analysis.
+// If workers <= 0, uses runtime.NumCPU() (auto-detect).
+// For graphs < 100 nodes, parallel analysis is automatically disabled regardless of this setting.
+func (b *Builder) WithParallelWorkers(workers int) *Builder {
+	b.parallelWorkers = workers
+	return b
+}
 
 // Build validates configuration and returns a new Engine.
 func (b *Builder) Build() (*Engine, error) {
