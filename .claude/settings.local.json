@@ -10,7 +10,16 @@
       "Bash(set CGO_ENABLED=1:*)",
       "Bash($env:CGO_ENABLED=\"1\")",
       "Bash(go build:*)",
-      "Bash(go vet:*)"
+      "Bash(go vet:*)",
+      "Bash(git remote add:*)",
+      "Bash(git push:*)",
+      "Bash(/dev/null << 'EOF'\nThis is a read-only analysis. I will create a comprehensive report based on my findings.\nEOF)",
+      "Bash(git -C \"C:\\\\Users\\\\Matheus\\\\Dev\\\\Projects\\\\go\\\\itt-engine\" log --oneline -5)",
+      "Bash(git -C \"C:\\\\Users\\\\Matheus\\\\Dev\\\\Projects\\\\go\\\\itt-engine\" ls-files:*)",
+      "Bash(findstr:*)",
+      "Bash(powershell:*)",
+      "Bash(python3:*)",
+      "Bash(git restore:*)"
     ]
   }
 }

@@ -6,10 +6,12 @@ import (
 	"math"
 	"runtime"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/MatheusGrego/itt-engine/analysis"
+	"github.com/MatheusGrego/itt-engine/cache"
 	"github.com/MatheusGrego/itt-engine/export"
 	"github.com/MatheusGrego/itt-engine/graph"
 	"github.com/MatheusGrego/itt-engine/mvcc"
@@ -24,13 +26,16 @@ type Snapshot struct {
 	mu      sync.Mutex
 	onClose func()
 
+	// Cache (Phase 2)
+	cache *cache.ResultsCache
+
 	tensionHistory   map[string]*analysis.TensionHistory
 	tensionHistoryMu *sync.RWMutex
 	diffusivityAlpha float64
 }
 
-func newSnapshot(v *mvcc.Version, cfg *Builder, base *graph.ImmutableGraph) *Snapshot {
-	return &Snapshot{version: v, config: cfg, base: base}
+func newSnapshot(v *mvcc.Version, cfg *Builder, base *graph.ImmutableGraph, c *cache.ResultsCache) *Snapshot {
+	return &Snapshot{version: v, config: cfg, base: base, cache: c}
 }
 
 // ID returns the snapshot identifier.
@@ -223,6 +228,20 @@ func (s *Snapshot) Analyze() (*Results, error) {
 	defer s.mu.Unlock()
 	if err := s.checkClosed(); err != nil {
 		return nil, err
+	}
+
+	// Phase 2: Cache lookup
+	if s.cache != nil {
+		key := cache.CacheKey{
+			VersionID: s.version.ID,
+			QueryType: "full_analysis",
+			QueryArgs: "",
+		}
+		if cached, ok := s.cache.Get(key); ok {
+			if result, ok := cached.(*Results); ok {
+				return result, nil
+			}
+		}
 	}
 
 	start := time.Now()
@@ -451,7 +470,7 @@ func (s *Snapshot) Analyze() (*Results, error) {
 		}
 	}
 
-	return &Results{
+	result := &Results{
 		Tensions:   results,
 		Anomalies:  anomalies,
 		Stats:      stats,
@@ -465,7 +484,19 @@ func (s *Snapshot) Analyze() (*Results, error) {
 			Region:    int(det.Region),
 			Alpha:     det.Alpha,
 		},
-	}, nil
+	}
+
+	// Phase 2: Store in cache
+	if s.cache != nil {
+		key := cache.CacheKey{
+			VersionID: s.version.ID,
+			QueryType: "full_analysis",
+			QueryArgs: "",
+		}
+		s.cache.Set(key, result)
+	}
+
+	return result, nil
 }
 
 // AnalyzeNode computes tension for a single node.
@@ -474,6 +505,20 @@ func (s *Snapshot) AnalyzeNode(nodeID string) (*TensionResult, error) {
 	defer s.mu.Unlock()
 	if err := s.checkClosed(); err != nil {
 		return nil, err
+	}
+
+	// Phase 2: Cache lookup
+	if s.cache != nil {
+		key := cache.CacheKey{
+			VersionID: s.version.ID,
+			QueryType: "node_analysis",
+			QueryArgs: nodeID,
+		}
+		if cached, ok := s.cache.Get(key); ok {
+			if result, ok := cached.(*TensionResult); ok {
+				return result, nil
+			}
+		}
 	}
 
 	gv := s.graphView()
@@ -552,7 +597,7 @@ func (s *Snapshot) AnalyzeNode(nodeID string) (*TensionResult, error) {
 		concealment = concCalc.CalculateNode(gv, nodeID, s.config.concealmentHops)
 	}
 
-	return &TensionResult{
+	result := &TensionResult{
 		NodeID:      nodeID,
 		Tension:     t,
 		Degree:      n.Degree,
@@ -565,7 +610,19 @@ func (s *Snapshot) AnalyzeNode(nodeID string) (*TensionResult, error) {
 			"curvature":   curv,
 			"concealment": concealment,
 		},
-	}, nil
+	}
+
+	// Phase 2: Store in cache
+	if s.cache != nil {
+		key := cache.CacheKey{
+			VersionID: s.version.ID,
+			QueryType: "node_analysis",
+			QueryArgs: nodeID,
+		}
+		s.cache.Set(key, result)
+	}
+
+	return result, nil
 }
 
 // AnalyzeRegion computes tension for a subset of nodes.
@@ -574,6 +631,24 @@ func (s *Snapshot) AnalyzeRegion(nodeIDs []string) (*RegionResult, error) {
 	defer s.mu.Unlock()
 	if err := s.checkClosed(); err != nil {
 		return nil, err
+	}
+
+	// Phase 2: Cache lookup
+	if s.cache != nil {
+		// Sort nodeIDs for consistent cache key
+		sortedIDs := make([]string, len(nodeIDs))
+		copy(sortedIDs, nodeIDs)
+		sort.Strings(sortedIDs)
+		key := cache.CacheKey{
+			VersionID: s.version.ID,
+			QueryType: "region_analysis",
+			QueryArgs: strings.Join(sortedIDs, ","),
+		}
+		if cached, ok := s.cache.Get(key); ok {
+			if result, ok := cached.(*RegionResult); ok {
+				return result, nil
+			}
+		}
 	}
 
 	gv := s.graphView()
@@ -736,6 +811,20 @@ func (s *Snapshot) AnalyzeRegion(nodeIDs []string) (*RegionResult, error) {
 			totalConcealment += tr.Concealment
 		}
 		region.CPS = analysis.CPS(tensionValues, totalConcealment, detAlpha)
+	}
+
+	// Phase 2: Store in cache
+	if s.cache != nil {
+		// Sort nodeIDs for consistent cache key
+		sortedIDs := make([]string, len(nodeIDs))
+		copy(sortedIDs, nodeIDs)
+		sort.Strings(sortedIDs)
+		key := cache.CacheKey{
+			VersionID: s.version.ID,
+			QueryType: "region_analysis",
+			QueryArgs: strings.Join(sortedIDs, ","),
+		}
+		s.cache.Set(key, region)
 	}
 
 	return region, nil

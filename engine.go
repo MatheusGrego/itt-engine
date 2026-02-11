@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/MatheusGrego/itt-engine/analysis"
+	"github.com/MatheusGrego/itt-engine/cache"
 	"github.com/MatheusGrego/itt-engine/compact"
 	"github.com/MatheusGrego/itt-engine/graph"
 	"github.com/MatheusGrego/itt-engine/mvcc"
@@ -43,6 +44,10 @@ type Engine struct {
 	tensionHistoryMu sync.RWMutex
 	lastTrend        map[string]Trend
 	lastTrendMu      sync.RWMutex
+
+	// Cache (Phase 2)
+	ResultsCache *cache.ResultsCache
+	cacheEnabled bool
 }
 
 func newEngine(cfg *Builder) *Engine {
@@ -96,6 +101,12 @@ func newEngine(cfg *Builder) *Engine {
 	}
 	e.lastCompact = time.Now()
 
+	// Initialize cache (Phase 2)
+	if cfg.cacheEnabled {
+		e.ResultsCache = cache.NewResultsCache(cfg.cacheTTL)
+		e.cacheEnabled = true
+	}
+
 	return e
 }
 
@@ -110,9 +121,18 @@ func (e *Engine) Start(ctx context.Context) error {
 	e.stopped.Store(false)
 	e.startTime = time.Now()
 
-	e.wg.Add(2) // worker + gcWorker
+	workerCount := 2 // worker + gcWorker
+	if e.cacheEnabled {
+		workerCount++ // + cacheEvictionWorker
+	}
+
+	e.wg.Add(workerCount)
 	go e.worker()
 	go e.gcWorker()
+
+	if e.cacheEnabled {
+		go e.cacheEvictionWorker()
+	}
 
 	return nil
 }
@@ -184,7 +204,7 @@ func (e *Engine) Snapshot() *Snapshot {
 	e.baseMu.RLock()
 	base := e.base
 	e.baseMu.RUnlock()
-	snap := newSnapshot(v, e.config, base)
+	snap := newSnapshot(v, e.config, base, e.ResultsCache)
 	snap.onClose = func() { e.snapshotsActive.Add(-1) }
 	snap.tensionHistory = e.tensionHistory
 	snap.tensionHistoryMu = &e.tensionHistoryMu
@@ -349,14 +369,41 @@ func (e *Engine) gcWorker() {
 			return
 		case <-ticker.C:
 			stats := e.gc.Collect()
-			if stats.VersionsRemoved > 0 && e.config.onGC != nil {
-				e.safeCallback(func() {
-					e.config.onGC(GCStats{
-						VersionsRemoved: stats.VersionsRemoved,
-						OldestRemoved:   stats.OldestRemoved,
-						Timestamp:       stats.Timestamp,
+			if stats.VersionsRemoved > 0 {
+				// Invalidate cache entries for removed versions (Phase 2)
+				if e.cacheEnabled && e.ResultsCache != nil {
+					for _, versionID := range stats.RemovedVersions {
+						e.ResultsCache.InvalidateVersion(versionID)
+					}
+				}
+
+				if e.config.onGC != nil {
+					e.safeCallback(func() {
+						e.config.onGC(GCStats{
+							VersionsRemoved: stats.VersionsRemoved,
+							OldestRemoved:   stats.OldestRemoved,
+							Timestamp:       stats.Timestamp,
+						})
 					})
-				})
+				}
+			}
+		}
+	}
+}
+
+// cacheEvictionWorker periodically evicts expired cache entries (Phase 2)
+func (e *Engine) cacheEvictionWorker() {
+	defer e.wg.Done()
+	ticker := time.NewTicker(10 * time.Second) // more frequent than GC
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-e.ctx.Done():
+			return
+		case <-ticker.C:
+			if e.ResultsCache != nil {
+				e.ResultsCache.EvictExpired()
 			}
 		}
 	}
@@ -585,7 +632,7 @@ func (e *Engine) checkAnomalies(g *graph.ImmutableGraph, ev Event, version uint6
 		if anomaly {
 			confidence := 0.0
 			if node.Degree > 0 {
-				confidence = min(1.0, float64(node.Degree)/10.0)
+				confidence = math.Min(1.0, float64(node.Degree)/10.0)
 			}
 
 			result := TensionResult{

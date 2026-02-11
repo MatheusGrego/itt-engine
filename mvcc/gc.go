@@ -17,10 +17,11 @@ type GCConfig struct {
 
 // CollectStats holds GC run results.
 type CollectStats struct {
-	VersionsRemoved int
-	MemoryFreed     int64
-	OldestRemoved   uint64
-	Timestamp       time.Time
+	VersionsRemoved  int
+	RemovedVersions  []uint64 // List of version IDs that were removed (for cache invalidation)
+	MemoryFreed      int64
+	OldestRemoved    uint64
+	Timestamp        time.Time
 }
 
 // GC is a garbage collector for MVCC versions.
@@ -169,6 +170,7 @@ func (gc *GC) Collect() CollectStats {
 		}
 		delete(gc.versions, id)
 		stats.VersionsRemoved++
+		stats.RemovedVersions = append(stats.RemovedVersions, id)
 	}
 
 	return stats
