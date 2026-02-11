@@ -1,4 +1,14 @@
-# ITT Engine — GPU Acceleration Plan
+# ⛔ DEPRECATED — GPU Acceleration Plan (CUDA/CGO)
+
+> **DEPRECATED**: This plan was superseded by `2026-02-11-gpu-acceleration-gosl.md`
+> **Reason**: CUDA requires CGO + NVIDIA-only lock-in. Replaced by GoSL (Go → WGSL → WebGPU) for cross-platform, zero-CGO approach.
+> **Date Deprecated**: 2026-02-11
+
+---
+
+_Original plan below kept for historical reference._
+
+# ITT Engine — GPU Acceleration Plan (CUDA — DEPRECATED)
 
 **Goal**: Enable GPU-accelerated tensor computation for extreme-scale workloads (100k+ nodes, real-time batch analysis)
 
