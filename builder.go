@@ -3,6 +3,8 @@ package itt
 import (
 	"fmt"
 	"time"
+
+	"github.com/MatheusGrego/itt-engine/gpu"
 )
 
 // Builder configures and creates an Engine.
@@ -58,6 +60,10 @@ type Builder struct {
 
 	// Performance
 	parallelWorkers int // number of goroutines for parallel analysis (0 = auto-detect)
+
+	// GPU
+	gpuBackend   gpu.ComputeBackend
+	gpuThreshold int // minimum node count to route to GPU (0 = disabled)
 
 	// Cache
 	cacheEnabled bool
@@ -153,6 +159,32 @@ func (b *Builder) WithParallelWorkers(workers int) *Builder {
 	return b
 }
 
+// WithGPU enables GPU-accelerated analysis for graphs with at least threshold nodes.
+// Attempts to initialize the default GoSL backend. If GPU initialization fails,
+// the engine falls back to CPU silently — no error is returned.
+// A threshold of 0 disables GPU routing (same as not calling WithGPU).
+func (b *Builder) WithGPU(threshold int) *Builder {
+	if threshold <= 0 {
+		return b
+	}
+	backend, err := gpu.NewGoSLBackend()
+	if err != nil {
+		// GPU unavailable — degrade gracefully to CPU-only
+		return b
+	}
+	b.gpuBackend = backend
+	b.gpuThreshold = threshold
+	return b
+}
+
+// WithGPUBackend sets a specific GPU backend (useful for testing or alternative implementations).
+// The threshold controls the minimum node count to route analysis to GPU.
+func (b *Builder) WithGPUBackend(backend gpu.ComputeBackend, threshold int) *Builder {
+	b.gpuBackend = backend
+	b.gpuThreshold = threshold
+	return b
+}
+
 // WithCache enables result caching with the given TTL.
 // Cache dramatically improves read performance (100-1000x) for workloads with high cache hit rates.
 // TTL acts as a safety fallback; cache entries are invalidated when their MVCC version is GC'd.
@@ -186,6 +218,9 @@ func (b *Builder) Build() (*Engine, error) {
 	}
 	if b.concealmentHops < 0 {
 		return nil, fmt.Errorf("%w: concealmentHops must be >= 0", ErrInvalidConfig)
+	}
+	if b.gpuThreshold < 0 {
+		return nil, fmt.Errorf("%w: gpuThreshold must be >= 0", ErrInvalidConfig)
 	}
 
 	return newEngine(b), nil

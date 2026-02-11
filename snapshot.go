@@ -13,6 +13,7 @@ import (
 	"github.com/MatheusGrego/itt-engine/analysis"
 	"github.com/MatheusGrego/itt-engine/cache"
 	"github.com/MatheusGrego/itt-engine/export"
+	"github.com/MatheusGrego/itt-engine/gpu"
 	"github.com/MatheusGrego/itt-engine/graph"
 	"github.com/MatheusGrego/itt-engine/mvcc"
 )
@@ -255,13 +256,7 @@ func (s *Snapshot) Analyze() (*Results, error) {
 	}
 
 	tc := analysis.NewTensionCalculator(div)
-
-	// Use parallel analysis for large graphs (auto-fallback to sequential for < 100 nodes)
-	workers := runtime.NumCPU()
-	if s.config.parallelWorkers > 0 {
-		workers = s.config.parallelWorkers
-	}
-	tensions := analysis.CalculateAllParallel(tc, gv, workers)
+	tensions := s.computeTensions(gv, tc)
 
 	// Curvature (optional)
 	var edgeCurvatures map[[2]string]float64
@@ -828,6 +823,34 @@ func (s *Snapshot) AnalyzeRegion(nodeIDs []string) (*RegionResult, error) {
 	}
 
 	return region, nil
+}
+
+// computeTensions routes tension computation to GPU or CPU based on graph size and backend availability.
+// GPU is used when: backend != nil, backend.Available(), and nodeCount >= gpuThreshold.
+// On GPU error, falls back to CPU silently.
+func (s *Snapshot) computeTensions(gv analysis.GraphView, tc *analysis.TensionCalculator) map[string]float64 {
+	backend := s.config.gpuBackend
+	if backend != nil && backend.Available() && s.config.gpuThreshold > 0 && gv.NodeCount() >= s.config.gpuThreshold {
+		// analysis.GraphView and gpu.GraphView are structurally identical;
+		// *graph.ImmutableGraph and *graph.UnifiedView satisfy both.
+		if gpuView, ok := gv.(gpu.GraphView); ok {
+			tensions, err := backend.AnalyzeTensions(gpuView)
+			if err == nil {
+				return tensions
+			}
+			// GPU failed — fall through to CPU
+			if s.config.logger != nil {
+				s.config.logger.Warn("GPU analysis failed, falling back to CPU", "error", err)
+			}
+		}
+	}
+
+	// CPU path: parallel analysis
+	workers := runtime.NumCPU()
+	if s.config.parallelWorkers > 0 {
+		workers = s.config.parallelWorkers
+	}
+	return analysis.CalculateAllParallel(tc, gv, workers)
 }
 
 // graphViewAdapter wraps analysis.GraphView to satisfy itt.GraphView.

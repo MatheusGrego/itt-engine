@@ -146,6 +146,14 @@ func (e *Engine) Stop() error {
 	e.wg.Wait()
 	e.stopped.Store(true)
 	e.started.Store(false)
+
+	// Release GPU resources
+	if e.config.gpuBackend != nil {
+		if err := e.config.gpuBackend.Close(); err != nil {
+			e.reportError(err)
+		}
+	}
+
 	return nil
 }
 
