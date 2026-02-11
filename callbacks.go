@@ -82,15 +82,3 @@ type CalibratorStats struct {
 	LastRecalibration time.Time
 }
 
-// DistributionPair holds two distributions for batch divergence.
-type DistributionPair struct {
-	P []float64
-	Q []float64
-}
-
-// BatchDivergenceFunc extends DivergenceFunc with batch support.
-type BatchDivergenceFunc interface {
-	DivergenceFunc
-	ComputeBatch(pairs []DistributionPair) []float64
-	SupportsBatch() bool
-}

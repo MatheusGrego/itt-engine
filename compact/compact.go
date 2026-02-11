@@ -121,8 +121,8 @@ func Compact(base, overlay *graph.ImmutableGraph) (*graph.ImmutableGraph, Stats)
 	}
 }
 
-// ShouldCompact determines if compaction should trigger based on strategy.
-func ShouldCompact(strategy Strategy, overlayEvents int, threshold int, lastCompaction time.Time, interval time.Duration) bool {
+// shouldCompact determines if compaction should trigger based on strategy.
+func shouldCompact(strategy Strategy, overlayEvents int, threshold int, lastCompaction time.Time, interval time.Duration) bool {
 	switch strategy {
 	case ByVolume:
 		return overlayEvents >= threshold

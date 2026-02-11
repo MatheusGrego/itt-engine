@@ -10,10 +10,16 @@ type DivergenceFunc interface {
 	Name() string
 }
 
+// BoundedDivergence indicates whether a divergence function produces bounded values.
+type BoundedDivergence interface {
+	IsBounded() bool
+}
+
 // JSD implements Jensen-Shannon Divergence. Symmetric, bounded in [0, 1] (using log base 2).
 type JSD struct{}
 
-func (JSD) Name() string { return "jsd" }
+func (JSD) Name() string      { return "jsd" }
+func (JSD) IsBounded() bool   { return true }
 
 func (JSD) Compute(p, q []float64) float64 {
 	m := make([]float64, len(p))
@@ -26,7 +32,8 @@ func (JSD) Compute(p, q []float64) float64 {
 // KL implements Kullback-Leibler Divergence. Asymmetric, unbounded.
 type KL struct{}
 
-func (KL) Name() string { return "kl" }
+func (KL) Name() string      { return "kl" }
+func (KL) IsBounded() bool   { return false }
 
 func (KL) Compute(p, q []float64) float64 {
 	return klDiv(p, q)
@@ -35,7 +42,8 @@ func (KL) Compute(p, q []float64) float64 {
 // Hellinger implements Hellinger Distance. Symmetric, bounded in [0, 1].
 type Hellinger struct{}
 
-func (Hellinger) Name() string { return "hellinger" }
+func (Hellinger) Name() string      { return "hellinger" }
+func (Hellinger) IsBounded() bool   { return true }
 
 func (Hellinger) Compute(p, q []float64) float64 {
 	sum := 0.0

@@ -22,6 +22,10 @@ type Snapshot struct {
 	closed  bool
 	mu      sync.Mutex
 	onClose func()
+
+	tensionHistory   map[string]*analysis.TensionHistory
+	tensionHistoryMu *sync.RWMutex
+	diffusivityAlpha float64
 }
 
 func newSnapshot(v *mvcc.Version, cfg *Builder, base *graph.ImmutableGraph) *Snapshot {
@@ -235,9 +239,24 @@ func (s *Snapshot) Analyze() (*Results, error) {
 
 	// Curvature (optional)
 	var edgeCurvatures map[[2]string]float64
-	if s.config.curvatureAlpha > 0 {
+	if s.config.curvature != nil {
+		// Use user-provided CurvatureFunc
+		adapter := &graphViewAdapter{gv: gv}
+		edgeCurvatures = make(map[[2]string]float64)
+		gv.ForEachEdge(func(ed *graph.EdgeData) bool {
+			c := s.config.curvature.Compute(adapter, ed.From, ed.To)
+			edgeCurvatures[[2]string{ed.From, ed.To}] = c
+			return true
+		})
+	} else if s.config.curvatureAlpha > 0 {
 		cc := analysis.NewCurvatureCalculator(s.config.curvatureAlpha)
 		edgeCurvatures = cc.CalculateAll(gv)
+	}
+
+	// Concealment calculator (optional)
+	var concCalc *analysis.ConcealmentCalculator
+	if s.config.concealmentLambda > 0 {
+		concCalc = analysis.NewConcealmentCalculator(s.config.concealmentLambda, tc)
 	}
 
 	var results []TensionResult
@@ -277,16 +296,24 @@ func (s *Snapshot) Analyze() (*Results, error) {
 			confidence = math.Min(1.0, float64(n.Degree)/10.0)
 		}
 
+		// Concealment (optional)
+		concealment := 0.0
+		if concCalc != nil {
+			concealment = concCalc.CalculateNode(gv, n.ID, s.config.concealmentHops)
+		}
+
 		tr := TensionResult{
-			NodeID:     n.ID,
-			Tension:    t,
-			Degree:     n.Degree,
-			Curvature:  curv,
-			Anomaly:    anomaly,
-			Confidence: confidence,
+			NodeID:      n.ID,
+			Tension:     t,
+			Degree:      n.Degree,
+			Curvature:   curv,
+			Anomaly:     anomaly,
+			Confidence:  confidence,
+			Concealment: concealment,
 			Components: map[string]float64{
-				"tension":   t,
-				"curvature": curv,
+				"tension":     t,
+				"curvature":   curv,
+				"concealment": concealment,
 			},
 		}
 		results = append(results, tr)
@@ -298,13 +325,139 @@ func (s *Snapshot) Analyze() (*Results, error) {
 
 	stats := computeResultStats(tensionValues, len(anomalies))
 
+	// Detectability analysis
+	detAlpha := 0.05
+	if s.config.detectabilityAlpha > 0 {
+		detAlpha = s.config.detectabilityAlpha
+	}
+	det := analysis.Detectability(tensionValues, detAlpha)
+
+	// Warn if using unbounded divergence with detectability
+	if s.config.logger != nil && s.config.divergence != nil {
+		if bd, ok := s.config.divergence.(interface{ IsBounded() bool }); ok && !bd.IsBounded() {
+			s.config.logger.Warn("detectability results may be unreliable with unbounded divergence; JSD or Hellinger recommended")
+		}
+	}
+
+	// Temporal analysis (requires history from engine)
+	var temporal TemporalSummary
+	if s.tensionHistory != nil && s.tensionHistoryMu != nil {
+		// Build current tension map
+		currentTensions := make(map[string]float64, len(results))
+		for _, tr := range results {
+			currentTensions[tr.NodeID] = tr.Tension
+		}
+
+		// Get previous tensions from history
+		s.tensionHistoryMu.RLock()
+		prevTensions := make(map[string]float64)
+		for nodeID, h := range s.tensionHistory {
+			if prev, ok := h.Previous(); ok {
+				prevTensions[nodeID] = prev.Tension
+			}
+		}
+		s.tensionHistoryMu.RUnlock()
+
+		// Compute temporal indicators if we have history
+		if len(prevTensions) > 0 {
+			tempCalc := analysis.NewTemporalCalculator(s.diffusivityAlpha)
+			dt := time.Since(s.version.Timestamp)
+			if dt <= 0 {
+				dt = time.Millisecond // avoid division by zero
+			}
+			indicators := tempCalc.Indicators(currentTensions, prevTensions, dt)
+
+			// Compute trends per node
+			s.tensionHistoryMu.RLock()
+			for i, tr := range results {
+				if h, ok := s.tensionHistory[tr.NodeID]; ok {
+					if prev, ok := h.Previous(); ok {
+						delta := tr.Tension - prev.Tension
+						epsilon := 0.01
+						if delta > epsilon {
+							results[i].Trend = TrendIncreasing
+						} else if delta < -epsilon {
+							results[i].Trend = TrendDecreasing
+						}
+					}
+				}
+			}
+			s.tensionHistoryMu.RUnlock()
+
+			// Phase classification
+			prevMean := 0.0
+			if len(prevTensions) > 0 {
+				sum := 0.0
+				for _, v := range prevTensions {
+					sum += v
+				}
+				prevMean = sum / float64(len(prevTensions))
+			}
+
+			// Connectivity ratio approximation
+			connectivityRatio := 1.0 // default: assume no edge loss
+			if len(prevTensions) > 0 {
+				survived := 0
+				for nodeID := range prevTensions {
+					if _, ok := currentTensions[nodeID]; ok {
+						survived++
+					}
+				}
+				connectivityRatio = float64(survived) / float64(len(prevTensions))
+			}
+
+			phase := analysis.ClassifyPhase(indicators, stats.MeanTension, prevMean, connectivityRatio)
+
+			// Velocity of silence
+			velocity := 0.0
+			nodeIDs := make([]string, 0)
+			gv.ForEachNode(func(n *graph.NodeData) bool {
+				nodeIDs = append(nodeIDs, n.ID)
+				return true
+			})
+			if len(nodeIDs) >= 3 {
+				lambda1 := analysis.FiedlerApprox(gv, nodeIDs)
+				// Mean edge weight
+				edgeSum := 0.0
+				edgeCount := 0
+				gv.ForEachEdge(func(e *graph.EdgeData) bool {
+					edgeSum += e.Weight
+					edgeCount++
+					return true
+				})
+				meanEdgeLen := 1.0
+				if edgeCount > 0 {
+					meanEdgeLen = edgeSum / float64(edgeCount)
+				}
+				velocity = analysis.VelocityOfSilence(s.diffusivityAlpha, lambda1, meanEdgeLen)
+			}
+
+			temporal = TemporalSummary{
+				TensionSpike:   indicators.TensionSpike,
+				DecayExponent:  indicators.DecayExponent,
+				CurvatureShock: indicators.CurvatureShock,
+				Phase:          int(phase.Phase),
+				PhaseRho:       phase.Rho,
+				PhasePi:        phase.Pi,
+				Velocity:       velocity,
+			}
+		}
+	}
+
 	return &Results{
 		Tensions:   results,
 		Anomalies:  anomalies,
 		Stats:      stats,
+		Temporal:   temporal,
 		SnapshotID: fmt.Sprintf("snap-%d", s.version.ID),
 		AnalyzedAt: time.Now(),
 		Duration:   time.Since(start),
+		Detectability: DetectabilityResult{
+			SNR:       det.SNR,
+			Threshold: det.Threshold,
+			Region:    int(det.Region),
+			Alpha:     det.Alpha,
+		},
 	}, nil
 }
 
@@ -340,7 +493,25 @@ func (s *Snapshot) AnalyzeNode(nodeID string) (*TensionResult, error) {
 
 	// Curvature: mean of incident edges
 	curv := 0.0
-	if s.config.curvatureAlpha > 0 {
+	if s.config.curvature != nil {
+		// Use user-provided CurvatureFunc
+		adapter := &graphViewAdapter{gv: gv}
+		curvSum := 0.0
+		curvCount := 0
+		for _, neighbor := range gv.OutNeighbors(nodeID) {
+			c := s.config.curvature.Compute(adapter, nodeID, neighbor)
+			curvSum += c
+			curvCount++
+		}
+		for _, neighbor := range gv.InNeighbors(nodeID) {
+			c := s.config.curvature.Compute(adapter, neighbor, nodeID)
+			curvSum += c
+			curvCount++
+		}
+		if curvCount > 0 {
+			curv = curvSum / float64(curvCount)
+		}
+	} else if s.config.curvatureAlpha > 0 {
 		cc := analysis.NewCurvatureCalculator(s.config.curvatureAlpha)
 		curvSum := 0.0
 		curvCount := 0
@@ -367,16 +538,25 @@ func (s *Snapshot) AnalyzeNode(nodeID string) (*TensionResult, error) {
 		confidence = math.Min(1.0, float64(n.Degree)/10.0)
 	}
 
+	// Concealment (optional)
+	concealment := 0.0
+	if s.config.concealmentLambda > 0 {
+		concCalc := analysis.NewConcealmentCalculator(s.config.concealmentLambda, tc)
+		concealment = concCalc.CalculateNode(gv, nodeID, s.config.concealmentHops)
+	}
+
 	return &TensionResult{
-		NodeID:     nodeID,
-		Tension:    t,
-		Degree:     n.Degree,
-		Curvature:  curv,
-		Anomaly:    anomaly,
-		Confidence: confidence,
+		NodeID:      nodeID,
+		Tension:     t,
+		Degree:      n.Degree,
+		Curvature:   curv,
+		Anomaly:     anomaly,
+		Confidence:  confidence,
+		Concealment: concealment,
 		Components: map[string]float64{
-			"tension":   t,
-			"curvature": curv,
+			"tension":     t,
+			"curvature":   curv,
+			"concealment": concealment,
 		},
 	}, nil
 }
@@ -402,8 +582,19 @@ func (s *Snapshot) AnalyzeRegion(nodeIDs []string) (*RegionResult, error) {
 
 	// Curvature calculator (optional)
 	var cc *analysis.CurvatureCalculator
-	if s.config.curvatureAlpha > 0 {
+	if s.config.curvature == nil && s.config.curvatureAlpha > 0 {
 		cc = analysis.NewCurvatureCalculator(s.config.curvatureAlpha)
+	}
+
+	var adapter *graphViewAdapter
+	if s.config.curvature != nil {
+		adapter = &graphViewAdapter{gv: gv}
+	}
+
+	// Concealment calculator (optional)
+	var concCalc *analysis.ConcealmentCalculator
+	if s.config.concealmentLambda > 0 {
+		concCalc = analysis.NewConcealmentCalculator(s.config.concealmentLambda, tc)
 	}
 
 	var nodes []TensionResult
@@ -425,7 +616,23 @@ func (s *Snapshot) AnalyzeRegion(nodeIDs []string) (*RegionResult, error) {
 
 		// Curvature: mean of incident edges
 		curv := 0.0
-		if cc != nil {
+		if s.config.curvature != nil {
+			curvSum := 0.0
+			curvCount := 0
+			for _, neighbor := range gv.OutNeighbors(id) {
+				c := s.config.curvature.Compute(adapter, id, neighbor)
+				curvSum += c
+				curvCount++
+			}
+			for _, neighbor := range gv.InNeighbors(id) {
+				c := s.config.curvature.Compute(adapter, neighbor, id)
+				curvSum += c
+				curvCount++
+			}
+			if curvCount > 0 {
+				curv = curvSum / float64(curvCount)
+			}
+		} else if cc != nil {
 			curvSum := 0.0
 			curvCount := 0
 			for _, neighbor := range gv.OutNeighbors(id) {
@@ -451,16 +658,24 @@ func (s *Snapshot) AnalyzeRegion(nodeIDs []string) (*RegionResult, error) {
 			confidence = math.Min(1.0, float64(n.Degree)/10.0)
 		}
 
+		// Concealment (optional)
+		concealment := 0.0
+		if concCalc != nil {
+			concealment = concCalc.CalculateNode(gv, id, s.config.concealmentHops)
+		}
+
 		tr := TensionResult{
-			NodeID:     id,
-			Tension:    t,
-			Degree:     n.Degree,
-			Curvature:  curv,
-			Anomaly:    anomaly,
-			Confidence: confidence,
+			NodeID:      id,
+			Tension:     t,
+			Degree:      n.Degree,
+			Curvature:   curv,
+			Anomaly:     anomaly,
+			Confidence:  confidence,
+			Concealment: concealment,
 			Components: map[string]float64{
-				"tension":   t,
-				"curvature": curv,
+				"tension":     t,
+				"curvature":   curv,
+				"concealment": concealment,
 			},
 		}
 		nodes = append(nodes, tr)
@@ -486,13 +701,74 @@ func (s *Snapshot) AnalyzeRegion(nodeIDs []string) (*RegionResult, error) {
 		aggregated = s.config.aggregation(tensionValues)
 	}
 
-	return &RegionResult{
+	// Detectability analysis
+	detAlpha := 0.05
+	if s.config.detectabilityAlpha > 0 {
+		detAlpha = s.config.detectabilityAlpha
+	}
+	det := analysis.Detectability(tensionValues, detAlpha)
+
+	region := &RegionResult{
 		Nodes:        nodes,
 		MeanTension:  mean,
 		MaxTension:   maxVal,
 		AnomalyCount: anomalyCount,
 		Aggregated:   aggregated,
-	}, nil
+		Detectability: DetectabilityResult{
+			SNR:       det.SNR,
+			Threshold: det.Threshold,
+			Region:    int(det.Region),
+			Alpha:     det.Alpha,
+		},
+	}
+
+	// CPS: Concealment Probability Score (optional)
+	if s.config.concealmentLambda > 0 {
+		totalConcealment := 0.0
+		for _, tr := range nodes {
+			totalConcealment += tr.Concealment
+		}
+		region.CPS = analysis.CPS(tensionValues, totalConcealment, detAlpha)
+	}
+
+	return region, nil
+}
+
+// graphViewAdapter wraps analysis.GraphView to satisfy itt.GraphView.
+type graphViewAdapter struct {
+	gv analysis.GraphView
+}
+
+func (a *graphViewAdapter) GetNode(id string) (*Node, bool) {
+	n, ok := a.gv.GetNode(id)
+	if !ok {
+		return nil, false
+	}
+	return nodeFromGraph(n), true
+}
+
+func (a *graphViewAdapter) GetEdge(from, to string) (*Edge, bool) {
+	e, ok := a.gv.GetEdge(from, to)
+	if !ok {
+		return nil, false
+	}
+	return &Edge{
+		From: e.From, To: e.To, Weight: e.Weight,
+		Type: e.Type, Count: e.Count,
+		FirstSeen: e.FirstSeen, LastSeen: e.LastSeen,
+	}, true
+}
+
+func (a *graphViewAdapter) Neighbors(nodeID string) []string {
+	return a.gv.Neighbors(nodeID)
+}
+
+func (a *graphViewAdapter) InNeighbors(nodeID string) []string {
+	return a.gv.InNeighbors(nodeID)
+}
+
+func (a *graphViewAdapter) OutNeighbors(nodeID string) []string {
+	return a.gv.OutNeighbors(nodeID)
 }
 
 // nodeFromGraph converts graph.NodeData to itt.Node for callback interfaces.

@@ -215,28 +215,28 @@ func TestCompact_Stats(t *testing.T) {
 func TestShouldCompact_ByVolume(t *testing.T) {
 	last := time.Now().Add(-time.Minute)
 
-	if !ShouldCompact(ByVolume, 100, 100, last, time.Hour) {
+	if !shouldCompact(ByVolume, 100, 100, last, time.Hour) {
 		t.Fatal("expected true when overlayEvents == threshold")
 	}
-	if !ShouldCompact(ByVolume, 150, 100, last, time.Hour) {
+	if !shouldCompact(ByVolume, 150, 100, last, time.Hour) {
 		t.Fatal("expected true when overlayEvents > threshold")
 	}
-	if ShouldCompact(ByVolume, 50, 100, last, time.Hour) {
+	if shouldCompact(ByVolume, 50, 100, last, time.Hour) {
 		t.Fatal("expected false when overlayEvents < threshold")
 	}
 }
 
 func TestShouldCompact_ByTime(t *testing.T) {
-	if !ShouldCompact(ByTime, 0, 0, time.Now().Add(-2*time.Hour), time.Hour) {
+	if !shouldCompact(ByTime, 0, 0, time.Now().Add(-2*time.Hour), time.Hour) {
 		t.Fatal("expected true when interval exceeded")
 	}
-	if ShouldCompact(ByTime, 0, 0, time.Now().Add(-30*time.Minute), time.Hour) {
+	if shouldCompact(ByTime, 0, 0, time.Now().Add(-30*time.Minute), time.Hour) {
 		t.Fatal("expected false when interval not reached")
 	}
 }
 
 func TestShouldCompact_Manual(t *testing.T) {
-	if ShouldCompact(Manual, 1000, 1, time.Time{}, time.Nanosecond) {
+	if shouldCompact(Manual, 1000, 1, time.Time{}, time.Nanosecond) {
 		t.Fatal("Manual should always return false")
 	}
 }

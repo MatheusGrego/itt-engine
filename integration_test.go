@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -449,4 +450,211 @@ func TestFullWiringIntegration(t *testing.T) {
 
 	t.Logf("Integration: %d deltas, %d anomalies, %d compactions, %d calibrator obs, %d nodes, %d events",
 		deltaCount, len(anomalies), compactCount, len(cal.observations), nc, stats.EventsTotal)
+}
+
+func TestFullTemporalLifecycle(t *testing.T) {
+	// Track callbacks with atomic counters (safe from goroutines)
+	var spikeCount atomic.Int64
+	var anomalyCount atomic.Int64
+	var deltaCount atomic.Int64
+	var tensionChangedCount atomic.Int64
+
+	// Build engine with ALL v2 features
+	engine, err := NewBuilder().
+		Threshold(0.01).
+		CurvatureAlpha(0.5).
+		Concealment(0.5, 2).
+		DetectabilityAlpha(0.05).
+		TemporalCapacity(50).
+		DiffusivityAlpha(0.1).
+		TensionSpikeThreshold(0.1).
+		OnTensionSpike(func(nodeID string, delta float64) {
+			spikeCount.Add(1)
+		}).
+		OnChange(func(d Delta) {
+			deltaCount.Add(1)
+			if d.Type == DeltaTensionChanged {
+				tensionChangedCount.Add(1)
+			}
+		}).
+		OnAnomaly(func(r TensionResult) {
+			anomalyCount.Add(1)
+		}).
+		ChannelSize(10000).
+		Build()
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	if err := engine.Start(context.Background()); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer engine.Stop()
+
+	// ----------------------------------------------------------------
+	// Phase A -- Baseline: build a connected graph where nodes have multiple
+	// outgoing edges with varied weights so that tension is non-trivial.
+	// Each node-i connects to node-(i+1)%10, node-(i+2)%10, and node-(i+3)%10
+	// with different weights. Repeated 3x to build up history.
+	// ----------------------------------------------------------------
+	for round := 0; round < 3; round++ {
+		for i := 0; i < 10; i++ {
+			src := fmt.Sprintf("node-%d", i)
+			for step := 1; step <= 3; step++ {
+				tgt := fmt.Sprintf("node-%d", (i+step)%10)
+				w := float64(step) // weights: 1.0, 2.0, 3.0
+				if err := engine.AddEvent(Event{Source: src, Target: tgt, Weight: w}); err != nil {
+					t.Fatalf("Phase A AddEvent failed: %v", err)
+				}
+			}
+		}
+	}
+	time.Sleep(300 * time.Millisecond)
+
+	snap := engine.Snapshot()
+	results, err := snap.Analyze()
+	snap.Close()
+	if err != nil {
+		t.Fatalf("Phase A Analyze failed: %v", err)
+	}
+
+	if len(results.Tensions) == 0 {
+		t.Fatal("Phase A: expected tensions for multiple nodes, got none")
+	}
+	t.Logf("Phase A: %d nodes analyzed, mean tension=%.4f, max=%.4f",
+		results.Stats.NodesAnalyzed, results.Stats.MeanTension, results.Stats.MaxTension)
+
+	// In baseline, trends should not be TrendIncreasing (no anomaly injected yet).
+	// At least some nodes should be stable.
+	stableCount := 0
+	for _, tr := range results.Tensions {
+		if tr.Trend == TrendStable {
+			stableCount++
+		}
+	}
+	t.Logf("Phase A: %d/%d nodes with TrendStable", stableCount, len(results.Tensions))
+
+	// ----------------------------------------------------------------
+	// Phase B -- Anomaly injection: 10 events with extreme weight from
+	// "attacker" to "node-0". This creates a massive edge that skews
+	// distributions of neighbors of node-0.
+	// ----------------------------------------------------------------
+	for i := 0; i < 10; i++ {
+		if err := engine.AddEvent(Event{Source: "attacker", Target: "node-0", Weight: 50.0}); err != nil {
+			t.Fatalf("Phase B AddEvent failed: %v", err)
+		}
+	}
+	time.Sleep(300 * time.Millisecond)
+
+	// Verify OnTensionSpike callback fired at least once
+	spikes := spikeCount.Load()
+	t.Logf("Phase B: spike callback fired %d times", spikes)
+	if spikes == 0 {
+		t.Error("Phase B: expected OnTensionSpike callback to fire at least once")
+	}
+
+	// ----------------------------------------------------------------
+	// Phase C -- Analysis during anomaly
+	// ----------------------------------------------------------------
+	snap2 := engine.Snapshot()
+	results2, err := snap2.Analyze()
+	snap2.Close()
+	if err != nil {
+		t.Fatalf("Phase C Analyze failed: %v", err)
+	}
+
+	t.Logf("Phase C: anomalyCount=%d, detectability Region=%d SNR=%.4f",
+		results2.Stats.AnomalyCount, results2.Detectability.Region, results2.Detectability.SNR)
+	t.Logf("Phase C: Temporal spike=%.4f phase=%d velocity=%.4f",
+		results2.Temporal.TensionSpike, results2.Temporal.Phase, results2.Temporal.Velocity)
+
+	// Dump per-node tensions for diagnostics
+	for _, tr := range results2.Tensions {
+		t.Logf("  node=%s tension=%.6f anomaly=%v concealment=%.6f trend=%v",
+			tr.NodeID, tr.Tension, tr.Anomaly, tr.Concealment, tr.Trend)
+	}
+
+	// At least one anomaly detected
+	if results2.Stats.AnomalyCount == 0 {
+		t.Error("Phase C: expected at least one anomaly (AnomalyCount > 0)")
+	}
+
+	// Detectability: not Undetectable (Region == 0)
+	if results2.Detectability.Region == 0 {
+		t.Error("Phase C: expected detectability Region to be WeaklyDetectable(1) or StronglyDetectable(2), got Undetectable(0)")
+	}
+
+	// At least one node has Concealment > 0
+	hasConcealment := false
+	for _, tr := range results2.Tensions {
+		if tr.Concealment > 0 {
+			hasConcealment = true
+			break
+		}
+	}
+	if !hasConcealment {
+		t.Error("Phase C: expected at least one node with Concealment > 0")
+	}
+
+	// At least one node has Trend == TrendIncreasing
+	hasIncreasing := false
+	for _, tr := range results2.Tensions {
+		if tr.Trend == TrendIncreasing {
+			hasIncreasing = true
+			break
+		}
+	}
+	if !hasIncreasing {
+		t.Log("Phase C: warning - no node with TrendIncreasing found (may depend on history depth)")
+	}
+
+	// Temporal: TensionSpike > 0
+	if results2.Temporal.TensionSpike <= 0 {
+		t.Error("Phase C: expected Temporal.TensionSpike > 0")
+	}
+
+	// ----------------------------------------------------------------
+	// Phase D -- Region analysis for a larger set of nodes.
+	// With only 2 nodes the SNR may fall below Yharim limit, so use
+	// enough nodes to ensure the region is detectable and CPS > 0.
+	// ----------------------------------------------------------------
+	snap3 := engine.Snapshot()
+	regionNodes := []string{"attacker", "node-0", "node-1", "node-2", "node-3", "node-4", "node-5"}
+	regionResult, err := snap3.AnalyzeRegion(regionNodes)
+	snap3.Close()
+	if err != nil {
+		t.Fatalf("Phase D AnalyzeRegion failed: %v", err)
+	}
+
+	t.Logf("Phase D: Region CPS=%.4f, Detectability SNR=%.4f Region=%d",
+		regionResult.CPS, regionResult.Detectability.SNR, regionResult.Detectability.Region)
+
+	if regionResult.CPS < 0 {
+		t.Error("Phase D: expected RegionResult.CPS >= 0")
+	}
+	if regionResult.Detectability.SNR <= 0 {
+		t.Error("Phase D: expected RegionResult.Detectability.SNR > 0")
+	}
+	// If region is detectable, CPS should be positive
+	if regionResult.Detectability.Region > 0 && regionResult.CPS <= 0 {
+		t.Error("Phase D: region is detectable but CPS is 0")
+	}
+
+	// ----------------------------------------------------------------
+	// Phase E -- Delta verification: DeltaTensionChanged emitted at least once
+	// ----------------------------------------------------------------
+	tcCount := tensionChangedCount.Load()
+	t.Logf("Phase E: DeltaTensionChanged emitted %d times, total deltas=%d, anomaly callbacks=%d",
+		tcCount, deltaCount.Load(), anomalyCount.Load())
+	if tcCount == 0 {
+		t.Error("Phase E: expected DeltaTensionChanged to be emitted at least once via OnChange callback")
+	}
+
+	// Cleanup
+	if err := engine.Stop(); err != nil {
+		t.Fatalf("Stop failed: %v", err)
+	}
+
+	t.Logf("TestFullTemporalLifecycle complete: spikes=%d anomalies=%d deltas=%d tensionChanged=%d",
+		spikeCount.Load(), anomalyCount.Load(), deltaCount.Load(), tensionChangedCount.Load())
 }

@@ -1,6 +1,9 @@
 package itt
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // Event is the atomic unit of ingestion.
 type Event struct {
@@ -60,25 +63,70 @@ type Edge struct {
 	LastSeen  time.Time
 }
 
+// Trend indicates the direction of tension change for a node.
+type Trend int
+
+const (
+	TrendStable     Trend = iota // |delta tau| < epsilon
+	TrendIncreasing              // tension growing (active anomaly)
+	TrendDecreasing              // tension decaying (recovery)
+)
+
+// String returns a human-readable name for the trend.
+func (t Trend) String() string {
+	switch t {
+	case TrendStable:
+		return "Stable"
+	case TrendIncreasing:
+		return "Increasing"
+	case TrendDecreasing:
+		return "Decreasing"
+	default:
+		return fmt.Sprintf("Trend(%d)", int(t))
+	}
+}
+
 // TensionResult holds the analysis output for a single node.
 type TensionResult struct {
-	NodeID     string
-	Tension    float64
-	Degree     int
-	Curvature  float64
-	Anomaly    bool
-	Confidence float64
-	Components map[string]float64
+	NodeID      string
+	Tension     float64
+	Degree      int
+	Curvature   float64
+	Anomaly     bool
+	Confidence  float64
+	Concealment float64
+	Trend       Trend
+	Components  map[string]float64
+}
+
+// TemporalSummary holds temporal dynamics for the full analysis.
+type TemporalSummary struct {
+	// TensionSpike: max |delta tau| across nodes between snapshots.
+	TensionSpike float64
+	// DecayExponent: gamma(t). Positive = recovery, negative = growth.
+	DecayExponent float64
+	// CurvatureShock: max |delta kappa| across edges.
+	CurvatureShock float64
+	// Phase: 0=FullRecovery, 1=ScarredRecovery, 2=ChronicTension, 3=StructuralCollapse
+	Phase int
+	// PhaseRho: suppression intensity rho
+	PhaseRho float64
+	// PhasePi: healing capacity pi
+	PhasePi float64
+	// Velocity: velocity of silence (propagation speed).
+	Velocity float64
 }
 
 // Results holds the full analysis output.
 type Results struct {
-	Tensions   []TensionResult
-	Anomalies  []TensionResult
-	Stats      ResultStats
-	SnapshotID string
-	AnalyzedAt time.Time
-	Duration   time.Duration
+	Tensions      []TensionResult
+	Anomalies     []TensionResult
+	Stats         ResultStats
+	Temporal      TemporalSummary
+	SnapshotID    string
+	AnalyzedAt    time.Time
+	Duration      time.Duration
+	Detectability DetectabilityResult
 }
 
 // ResultStats holds aggregate statistics from analysis.
@@ -94,11 +142,21 @@ type ResultStats struct {
 
 // RegionResult holds analysis for a subset of nodes.
 type RegionResult struct {
-	Nodes        []TensionResult
-	MeanTension  float64
-	MaxTension   float64
-	AnomalyCount int
-	Aggregated   float64
+	Nodes         []TensionResult
+	MeanTension   float64
+	MaxTension    float64
+	AnomalyCount  int
+	Aggregated    float64
+	Detectability DetectabilityResult
+	CPS           float64
+}
+
+// DetectabilityResult holds the detectability analysis.
+type DetectabilityResult struct {
+	SNR       float64
+	Threshold float64
+	Region    int // 0=Undetectable, 1=WeaklyDetectable, 2=StronglyDetectable
+	Alpha     float64
 }
 
 // DeltaType enumerates graph change types.

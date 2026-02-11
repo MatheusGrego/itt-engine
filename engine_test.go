@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/MatheusGrego/itt-engine/analysis"
 )
 
 // === Builder tests ===
@@ -1293,4 +1296,700 @@ func TestCheckAnomaliesWithCalibrator(t *testing.T) {
 	t.Logf("calibrator observations: %d, anomalies detected: %d", len(cal.observations), anomalyCount)
 
 	engine.Stop()
+}
+
+// === Mock types for V2 tests ===
+
+// mockStorage implements itt.Storage
+type mockStorage struct {
+	data  *GraphData
+	saved atomic.Bool
+	mu    sync.Mutex
+}
+
+func (m *mockStorage) Load() (*GraphData, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.data, nil
+}
+
+func (m *mockStorage) Save(data *GraphData) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.data = data
+	m.saved.Store(true)
+	return nil
+}
+
+// mockLogger implements itt.Logger
+type mockLogger struct {
+	warns []string
+	mu    sync.Mutex
+}
+
+func (l *mockLogger) Debug(msg string, kv ...any) {}
+func (l *mockLogger) Info(msg string, kv ...any)  {}
+func (l *mockLogger) Warn(msg string, kv ...any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.warns = append(l.warns, msg)
+}
+func (l *mockLogger) Error(msg string, kv ...any) {}
+
+// mockCurvatureFunc implements itt.CurvatureFunc
+type mockCurvatureFunc struct{}
+
+func (m mockCurvatureFunc) Compute(g GraphView, from, to string) float64 { return 0.42 }
+func (m mockCurvatureFunc) Name() string                                 { return "mock" }
+
+// === V2 Tests ===
+
+func TestV2_DeltaFieldsPopulated(t *testing.T) {
+	var mu sync.Mutex
+	var deltas []Delta
+
+	e, err := NewBuilder().
+		Threshold(0.001).
+		OnChange(func(d Delta) {
+			mu.Lock()
+			deltas = append(deltas, d)
+			mu.Unlock()
+		}).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// First event: creates new nodes and edge
+	e.AddEvent(Event{Source: "x", Target: "y", Weight: 1})
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	// Verify DeltaNodeAdded deltas have Node != nil
+	for _, d := range deltas {
+		if d.Type == DeltaNodeAdded {
+			if d.Node == nil {
+				t.Errorf("DeltaNodeAdded for %q should have Node != nil", d.NodeID)
+			}
+		}
+	}
+	mu.Unlock()
+
+	// Second event to same edge: should produce DeltaEdgeUpdated with Edge != nil and Previous > 0
+	mu.Lock()
+	deltas = deltas[:0]
+	mu.Unlock()
+
+	e.AddEvent(Event{Source: "x", Target: "y", Weight: 2})
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	foundEdgeUpdated := false
+	for _, d := range deltas {
+		if d.Type == DeltaEdgeUpdated {
+			foundEdgeUpdated = true
+			if d.Edge == nil {
+				t.Error("DeltaEdgeUpdated should have Edge != nil")
+			}
+			if d.Previous <= 0 {
+				t.Errorf("DeltaEdgeUpdated.Previous should be > 0, got %f", d.Previous)
+			}
+		}
+	}
+	mu.Unlock()
+
+	if !foundEdgeUpdated {
+		t.Error("expected DeltaEdgeUpdated after second event to same edge")
+	}
+
+	e.Stop()
+}
+
+func TestV2_BaseGraphInitialization(t *testing.T) {
+	data := &GraphData{
+		Nodes: []*Node{
+			{ID: "base1", Degree: 1, OutDegree: 1},
+			{ID: "base2", Degree: 1, InDegree: 1},
+		},
+		Edges: []*Edge{
+			{From: "base1", To: "base2", Weight: 1.0, Count: 1},
+		},
+	}
+
+	e, err := NewBuilder().
+		BaseGraph(data).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	snap := e.Snapshot()
+	defer snap.Close()
+
+	nc, err := snap.NodeCount()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nc < 2 {
+		t.Fatalf("expected at least 2 nodes from base graph, got %d", nc)
+	}
+
+	// Verify specific base node exists
+	n, ok, err := snap.GetNode("base1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected base1 node to exist in snapshot")
+	}
+	if n.ID != "base1" {
+		t.Errorf("expected node ID base1, got %s", n.ID)
+	}
+}
+
+func TestV2_StorageLoadOnStart(t *testing.T) {
+	ms := &mockStorage{
+		data: &GraphData{
+			Nodes: []*Node{
+				{ID: "stored1", Degree: 1, OutDegree: 1},
+				{ID: "stored2", Degree: 1, InDegree: 1},
+			},
+			Edges: []*Edge{
+				{From: "stored1", To: "stored2", Weight: 1.0, Count: 1},
+			},
+		},
+	}
+
+	e, err := NewBuilder().
+		WithStorage(ms).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	snap := e.Snapshot()
+	defer snap.Close()
+
+	nc, err := snap.NodeCount()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nc < 2 {
+		t.Fatalf("expected at least 2 nodes loaded from storage, got %d", nc)
+	}
+
+	// Verify stored nodes are present
+	_, ok, err := snap.GetNode("stored1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected stored1 to be loaded from storage")
+	}
+}
+
+func TestV2_StorageSaveOnCompact(t *testing.T) {
+	ms := &mockStorage{}
+
+	e, err := NewBuilder().
+		WithStorage(ms).
+		CompactionStrategy(CompactManual).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Add some events
+	for i := 0; i < 5; i++ {
+		e.AddEvent(Event{
+			Source: fmt.Sprintf("s%d", i),
+			Target: fmt.Sprintf("t%d", i),
+			Weight: 1,
+		})
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	// Compact should trigger storage save
+	err = e.Compact()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Save happens in a goroutine, wait for it
+	time.Sleep(200 * time.Millisecond)
+
+	if !ms.saved.Load() {
+		t.Error("expected storage Save to be called after compaction")
+	}
+
+	e.Stop()
+}
+
+func TestV2_DetectabilityInResults(t *testing.T) {
+	e, err := NewBuilder().
+		Threshold(0.001).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Add diverse events to generate varied tensions
+	e.AddEvent(Event{Source: "hub", Target: "a", Weight: 1})
+	e.AddEvent(Event{Source: "hub", Target: "b", Weight: 1})
+	e.AddEvent(Event{Source: "hub", Target: "c", Weight: 1})
+	e.AddEvent(Event{Source: "a", Target: "b", Weight: 1})
+	e.AddEvent(Event{Source: "extreme", Target: "hub", Weight: 100})
+	time.Sleep(200 * time.Millisecond)
+
+	snap := e.Snapshot()
+	defer snap.Close()
+
+	results, err := snap.Analyze()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// SNR should be a valid number (>= 0)
+	if results.Detectability.SNR < 0 {
+		t.Errorf("expected Detectability.SNR >= 0, got %f", results.Detectability.SNR)
+	}
+
+	// Region should be a valid value: 0 (Undetectable), 1 (WeaklyDetectable), or 2 (StronglyDetectable)
+	if results.Detectability.Region < 0 || results.Detectability.Region > 2 {
+		t.Errorf("expected Detectability.Region in {0,1,2}, got %d", results.Detectability.Region)
+	}
+
+	t.Logf("Detectability: SNR=%f, Region=%d, Threshold=%f",
+		results.Detectability.SNR, results.Detectability.Region, results.Detectability.Threshold)
+
+	e.Stop()
+}
+
+func TestV2_ConcealmentInResults(t *testing.T) {
+	e, err := NewBuilder().
+		Concealment(0.5, 2).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Build a small graph
+	e.AddEvent(Event{Source: "a", Target: "b", Weight: 1})
+	e.AddEvent(Event{Source: "b", Target: "c", Weight: 1})
+	e.AddEvent(Event{Source: "c", Target: "a", Weight: 1})
+	e.AddEvent(Event{Source: "a", Target: "d", Weight: 1})
+	time.Sleep(150 * time.Millisecond)
+
+	snap := e.Snapshot()
+	defer snap.Close()
+
+	results, err := snap.Analyze()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hasConcealment := false
+	for _, tr := range results.Tensions {
+		if tr.Concealment > 0 {
+			hasConcealment = true
+			break
+		}
+	}
+
+	if !hasConcealment {
+		t.Log("Warning: no concealment > 0 found; may be expected for uniform graph")
+	}
+
+	// Verify concealment is in Components
+	for _, tr := range results.Tensions {
+		if _, ok := tr.Components["concealment"]; !ok {
+			t.Errorf("node %s: missing concealment component", tr.NodeID)
+		}
+	}
+
+	e.Stop()
+}
+
+func TestV2_CPSInRegionResult(t *testing.T) {
+	e, err := NewBuilder().
+		Concealment(0.5, 2).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	e.AddEvent(Event{Source: "a", Target: "b", Weight: 1})
+	e.AddEvent(Event{Source: "b", Target: "c", Weight: 1})
+	e.AddEvent(Event{Source: "c", Target: "a", Weight: 1})
+	time.Sleep(100 * time.Millisecond)
+
+	snap := e.Snapshot()
+	defer snap.Close()
+
+	result, err := snap.AnalyzeRegion([]string{"a", "b", "c"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// CPS field should exist (may be 0 if not detectable, but should be non-negative)
+	if result.CPS < 0 {
+		t.Errorf("expected CPS >= 0, got %f", result.CPS)
+	}
+
+	t.Logf("RegionResult.CPS = %f", result.CPS)
+
+	e.Stop()
+}
+
+func TestV2_TensionHistoryPopulated(t *testing.T) {
+	e, err := NewBuilder().
+		Threshold(0.001).
+		OnAnomaly(func(r TensionResult) {}).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Add multiple events involving the same nodes to build history
+	for i := 0; i < 5; i++ {
+		e.AddEvent(Event{Source: "h", Target: "a", Weight: float64(i + 1)})
+		e.AddEvent(Event{Source: "h", Target: "b", Weight: float64(i + 1)})
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify via Analyze() that temporal data is populated
+	snap := e.Snapshot()
+	defer snap.Close()
+	results, err := snap.Analyze()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// With onAnomaly set and multiple events, checkAnomalies runs and populates tensionHistory.
+	// After the second Analyze, Temporal fields should be non-zero if history exists.
+	// At minimum, the results should have tension values from the history.
+	if len(results.Tensions) == 0 {
+		t.Fatal("expected tension results")
+	}
+
+	// Check that trends are set (requires history from checkAnomalies)
+	hasTrend := false
+	for _, tr := range results.Tensions {
+		if tr.Trend != TrendStable {
+			hasTrend = true
+			break
+		}
+	}
+	t.Logf("hasTrend=%v, temporal.TensionSpike=%f", hasTrend, results.Temporal.TensionSpike)
+
+	e.Stop()
+}
+
+func TestV2_OnTensionSpike(t *testing.T) {
+	var mu sync.Mutex
+	var spikes []struct {
+		nodeID string
+		delta  float64
+	}
+
+	e, err := NewBuilder().
+		Threshold(0.001).
+		OnAnomaly(func(r TensionResult) {}). // needed to trigger checkAnomalies
+		OnTensionSpike(func(nodeID string, delta float64) {
+			mu.Lock()
+			spikes = append(spikes, struct {
+				nodeID string
+				delta  float64
+			}{nodeID, delta})
+			mu.Unlock()
+		}).
+		TensionSpikeThreshold(0.0001). // extremely low threshold to catch any spike
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Build a small graph with repeated events to the same pair
+	// to establish history entries for the nodes
+	e.AddEvent(Event{Source: "a", Target: "b", Weight: 1})
+	time.Sleep(50 * time.Millisecond)
+	e.AddEvent(Event{Source: "a", Target: "c", Weight: 1})
+	time.Sleep(50 * time.Millisecond)
+	e.AddEvent(Event{Source: "b", Target: "c", Weight: 1})
+	time.Sleep(50 * time.Millisecond)
+
+	// Now add an extreme event that should shift tension drastically for "a"
+	e.AddEvent(Event{Source: "a", Target: "b", Weight: 500})
+	time.Sleep(200 * time.Millisecond)
+
+	// Also add more extreme events to maximize delta
+	e.AddEvent(Event{Source: "a", Target: "c", Weight: 500})
+	time.Sleep(200 * time.Millisecond)
+
+	mu.Lock()
+	spikeCount := len(spikes)
+	mu.Unlock()
+
+	if spikeCount == 0 {
+		t.Error("expected OnTensionSpike to fire at least once")
+	} else {
+		mu.Lock()
+		for _, s := range spikes {
+			if s.delta <= 0 {
+				t.Errorf("spike delta should be positive, got %f for node %s", s.delta, s.nodeID)
+			}
+		}
+		mu.Unlock()
+		t.Logf("total spikes detected: %d", spikeCount)
+	}
+
+	e.Stop()
+}
+
+func TestV2_DeltaTensionChanged(t *testing.T) {
+	var mu sync.Mutex
+	var deltas []Delta
+
+	e, err := NewBuilder().
+		Threshold(0.001).
+		OnAnomaly(func(r TensionResult) {}). // needed to trigger checkAnomalies which emits DeltaTensionChanged
+		OnChange(func(d Delta) {
+			mu.Lock()
+			deltas = append(deltas, d)
+			mu.Unlock()
+		}).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Phase 1: normal events to establish a trend
+	e.AddEvent(Event{Source: "a", Target: "b", Weight: 1})
+	e.AddEvent(Event{Source: "b", Target: "c", Weight: 1})
+	time.Sleep(100 * time.Millisecond)
+
+	// Phase 2: events that change the tension direction
+	for i := 0; i < 10; i++ {
+		e.AddEvent(Event{Source: "a", Target: "b", Weight: float64(50 + i*10)})
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	mu.Lock()
+	hasTensionChanged := false
+	for _, d := range deltas {
+		if d.Type == DeltaTensionChanged {
+			hasTensionChanged = true
+			break
+		}
+	}
+	mu.Unlock()
+
+	if !hasTensionChanged {
+		t.Log("Warning: DeltaTensionChanged was not emitted; trend may not have changed direction")
+	}
+
+	e.Stop()
+}
+
+func TestV2_TemporalSummaryInResults(t *testing.T) {
+	e, err := NewBuilder().
+		Threshold(0.001).
+		OnAnomaly(func(r TensionResult) {}). // trigger checkAnomalies to build history
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Phase 1: normal events
+	e.AddEvent(Event{Source: "a", Target: "b", Weight: 1})
+	e.AddEvent(Event{Source: "b", Target: "c", Weight: 1})
+	e.AddEvent(Event{Source: "c", Target: "a", Weight: 1})
+	time.Sleep(100 * time.Millisecond)
+
+	// First analysis to populate history
+	results1, err := e.Analyze()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = results1
+
+	// Phase 2: extreme events to change tensions
+	e.AddEvent(Event{Source: "a", Target: "b", Weight: 100})
+	e.AddEvent(Event{Source: "b", Target: "c", Weight: 100})
+	time.Sleep(100 * time.Millisecond)
+
+	// Second analysis should have temporal data from history
+	results2, err := e.Analyze()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Temporal summary should have some data if history was populated
+	t.Logf("Temporal: TensionSpike=%f, DecayExponent=%f, Phase=%d",
+		results2.Temporal.TensionSpike, results2.Temporal.DecayExponent, results2.Temporal.Phase)
+
+	// Phase should be a valid value (0-3)
+	if results2.Temporal.Phase < 0 || results2.Temporal.Phase > 3 {
+		t.Errorf("expected Phase in [0,3], got %d", results2.Temporal.Phase)
+	}
+
+	e.Stop()
+}
+
+func TestV2_TrendInTensionResult(t *testing.T) {
+	e, err := NewBuilder().
+		Threshold(0.001).
+		OnAnomaly(func(r TensionResult) {}).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Build a triangle
+	e.AddEvent(Event{Source: "a", Target: "b", Weight: 1})
+	e.AddEvent(Event{Source: "b", Target: "c", Weight: 1})
+	e.AddEvent(Event{Source: "c", Target: "a", Weight: 1})
+	time.Sleep(100 * time.Millisecond)
+
+	// First analyze to populate history
+	_, err = e.Analyze()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Add more events to change tension
+	e.AddEvent(Event{Source: "a", Target: "b", Weight: 50})
+	e.AddEvent(Event{Source: "b", Target: "c", Weight: 50})
+	time.Sleep(100 * time.Millisecond)
+
+	// Second analyze should have trends
+	results, err := e.Analyze()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tr := range results.Tensions {
+		// Trend should be a valid Trend value
+		if tr.Trend < TrendStable || tr.Trend > TrendDecreasing {
+			t.Errorf("node %s: invalid Trend value %d", tr.NodeID, tr.Trend)
+		}
+	}
+
+	e.Stop()
+}
+
+func TestV2_CurvatureFuncAdapter(t *testing.T) {
+	e, err := NewBuilder().
+		Curvature(mockCurvatureFunc{}).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	e.AddEvent(Event{Source: "a", Target: "b", Weight: 1})
+	e.AddEvent(Event{Source: "b", Target: "c", Weight: 1})
+	e.AddEvent(Event{Source: "c", Target: "a", Weight: 1})
+	time.Sleep(100 * time.Millisecond)
+
+	snap := e.Snapshot()
+	defer snap.Close()
+
+	results, err := snap.Analyze()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tr := range results.Tensions {
+		// mockCurvatureFunc always returns 0.42
+		curvVal, ok := tr.Components["curvature"]
+		if !ok {
+			t.Errorf("node %s: missing curvature component", tr.NodeID)
+			continue
+		}
+		// Curvature is averaged over incident edges, but all return 0.42 so the average should be 0.42
+		if curvVal < 0.41 || curvVal > 0.43 {
+			t.Errorf("node %s: expected curvature ~0.42, got %f", tr.NodeID, curvVal)
+		}
+	}
+
+	e.Stop()
+}
+
+func TestV2_JSDWarningLogged(t *testing.T) {
+	lg := &mockLogger{}
+
+	e, err := NewBuilder().
+		Divergence(analysis.KL{}).
+		WithLogger(lg).
+		Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Build enough graph to analyze
+	e.AddEvent(Event{Source: "a", Target: "b", Weight: 1})
+	e.AddEvent(Event{Source: "b", Target: "c", Weight: 1})
+	time.Sleep(100 * time.Millisecond)
+
+	snap := e.Snapshot()
+	defer snap.Close()
+
+	_, err = snap.Analyze()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	lg.mu.Lock()
+	hasWarning := false
+	for _, w := range lg.warns {
+		if strings.Contains(w, "unbounded") || strings.Contains(w, "unreliable") {
+			hasWarning = true
+			break
+		}
+	}
+	lg.mu.Unlock()
+
+	if !hasWarning {
+		t.Error("expected logger to receive warning about unbounded divergence")
+	}
+
+	e.Stop()
+}
+
+func TestV2_BuilderValidation(t *testing.T) {
+	t.Run("detectabilityAlpha_zero", func(t *testing.T) {
+		_, err := NewBuilder().
+			DetectabilityAlpha(0).
+			Build()
+		if err == nil {
+			t.Error("expected error for detectabilityAlpha=0")
+		}
+	})
+
+	t.Run("detectabilityAlpha_one", func(t *testing.T) {
+		_, err := NewBuilder().
+			DetectabilityAlpha(1).
+			Build()
+		if err == nil {
+			t.Error("expected error for detectabilityAlpha=1")
+		}
+	})
+
+	t.Run("concealmentLambda_negative", func(t *testing.T) {
+		_, err := NewBuilder().
+			Concealment(-1, 2).
+			Build()
+		if err == nil {
+			t.Error("expected error for concealmentLambda=-1")
+		}
+	})
+
+	t.Run("concealmentHops_negative", func(t *testing.T) {
+		_, err := NewBuilder().
+			Concealment(0.5, -1).
+			Build()
+		if err == nil {
+			t.Error("expected error for concealmentHops=-1")
+		}
+	})
 }

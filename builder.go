@@ -22,8 +22,6 @@ type Builder struct {
 	// MVCC
 	gcSnapshotWarning time.Duration
 	gcSnapshotForce   time.Duration
-	maxOverlaySize    int
-
 	// Compaction
 	compactionStrategy  CompactionStrategy
 	compactionThreshold int
@@ -44,8 +42,19 @@ type Builder struct {
 	baseGraph *GraphData
 
 	// Calibration
-	calibrator     Calibrator
-	curvatureAlpha float64
+	calibrator         Calibrator
+	curvatureAlpha     float64
+	detectabilityAlpha float64
+
+	// Concealment
+	concealmentLambda float64
+	concealmentHops   int
+
+	// Temporal
+	temporalCapacity      int
+	diffusivityAlpha      float64
+	onTensionSpike        func(nodeID string, delta float64)
+	tensionSpikeThreshold float64
 
 	// Internal
 	channelSize int
@@ -59,7 +68,8 @@ func (b *Builder) Curvature(c CurvatureFunc) *Builder {
 	}
 	return b
 }
-func (b *Builder) CurvatureAlpha(alpha float64) *Builder { b.curvatureAlpha = alpha; return b }
+func (b *Builder) CurvatureAlpha(alpha float64) *Builder      { b.curvatureAlpha = alpha; return b }
+func (b *Builder) DetectabilityAlpha(alpha float64) *Builder   { b.detectabilityAlpha = alpha; return b }
 func (b *Builder) Topology(t TopologyFunc) *Builder           { b.topology = t; return b }
 func (b *Builder) Threshold(t float64) *Builder               { b.threshold = t; return b }
 func (b *Builder) ThresholdFunc(f ThresholdFunc) *Builder     { b.thresholdFunc = f; return b }
@@ -68,7 +78,6 @@ func (b *Builder) NodeTypeFunc(f NodeTypeFunc) *Builder       { b.nodeTypeFunc =
 func (b *Builder) AggregationFunc(f AggregationFunc) *Builder { b.aggregation = f; return b }
 func (b *Builder) GCSnapshotWarning(d time.Duration) *Builder { b.gcSnapshotWarning = d; return b }
 func (b *Builder) GCSnapshotForce(d time.Duration) *Builder   { b.gcSnapshotForce = d; return b }
-func (b *Builder) MaxOverlaySize(n int) *Builder              { b.maxOverlaySize = n; return b }
 func (b *Builder) CompactionStrategy(s CompactionStrategy) *Builder {
 	b.compactionStrategy = s
 	return b
@@ -93,7 +102,41 @@ func (b *Builder) WithStorage(s Storage) *Builder { b.storage = s; return b }
 
 // WithCalibrator sets the anomaly calibrator.
 func (b *Builder) WithCalibrator(c Calibrator) *Builder { b.calibrator = c; return b }
-func (b *Builder) ChannelSize(n int) *Builder                  { b.channelSize = n; return b }
+
+// Concealment configures concealment cost analysis.
+// lambda is the exponential decay parameter, maxHops is the BFS neighborhood depth.
+// Set lambda to 0 to disable (default).
+func (b *Builder) Concealment(lambda float64, maxHops int) *Builder {
+	b.concealmentLambda = lambda
+	b.concealmentHops = maxHops
+	return b
+}
+
+// TemporalCapacity sets the ring buffer size for per-node tension history.
+func (b *Builder) TemporalCapacity(n int) *Builder {
+	b.temporalCapacity = n
+	return b
+}
+
+// DiffusivityAlpha sets the diffusivity constant for temporal calculations.
+func (b *Builder) DiffusivityAlpha(alpha float64) *Builder {
+	b.diffusivityAlpha = alpha
+	return b
+}
+
+// OnTensionSpike registers a callback fired when a node's tension delta exceeds the spike threshold.
+func (b *Builder) OnTensionSpike(f func(string, float64)) *Builder {
+	b.onTensionSpike = f
+	return b
+}
+
+// TensionSpikeThreshold sets the minimum tension delta to trigger a spike callback.
+func (b *Builder) TensionSpikeThreshold(t float64) *Builder {
+	b.tensionSpikeThreshold = t
+	return b
+}
+
+func (b *Builder) ChannelSize(n int) *Builder { b.channelSize = n; return b }
 
 // Build validates configuration and returns a new Engine.
 func (b *Builder) Build() (*Engine, error) {
@@ -105,6 +148,15 @@ func (b *Builder) Build() (*Engine, error) {
 	}
 	if b.channelSize <= 0 {
 		return nil, fmt.Errorf("%w: channelSize must be > 0", ErrInvalidConfig)
+	}
+	if b.detectabilityAlpha <= 0 || b.detectabilityAlpha >= 1 {
+		return nil, fmt.Errorf("%w: detectabilityAlpha must be in (0, 1)", ErrInvalidConfig)
+	}
+	if b.concealmentLambda < 0 {
+		return nil, fmt.Errorf("%w: concealmentLambda must be >= 0", ErrInvalidConfig)
+	}
+	if b.concealmentHops < 0 {
+		return nil, fmt.Errorf("%w: concealmentHops must be >= 0", ErrInvalidConfig)
 	}
 
 	return newEngine(b), nil

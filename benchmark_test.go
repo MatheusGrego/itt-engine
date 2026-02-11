@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/MatheusGrego/itt-engine/analysis"
+	"github.com/MatheusGrego/itt-engine/graph"
 )
 
 func BenchmarkAddEvent(b *testing.B) {
@@ -127,6 +130,146 @@ func BenchmarkConcurrentAddEvent(b *testing.B) {
 			e.AddEvent(ev)
 		}
 	})
+	b.StopTimer()
+	time.Sleep(200 * time.Millisecond)
+}
+
+func BenchmarkAnalyzeWithConcealment(b *testing.B) {
+	e, _ := NewBuilder().Concealment(0.5, 2).Build()
+	e.Start(context.Background())
+	defer e.Stop()
+
+	// Build a 100-node ring graph with 3 edges per node
+	for i := 0; i < 100; i++ {
+		for j := 0; j < 3; j++ {
+			e.AddEvent(Event{
+				Source: fmt.Sprintf("n%d", i),
+				Target: fmt.Sprintf("n%d", (i+j+1)%100),
+			})
+		}
+	}
+	time.Sleep(500 * time.Millisecond)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		snap := e.Snapshot()
+		snap.Analyze()
+		snap.Close()
+	}
+}
+
+func BenchmarkAnalyzeWithDetectability(b *testing.B) {
+	e, _ := NewBuilder().DetectabilityAlpha(0.05).Build()
+	e.Start(context.Background())
+	defer e.Stop()
+
+	// Build a 100-node ring graph with 3 edges per node
+	for i := 0; i < 100; i++ {
+		for j := 0; j < 3; j++ {
+			e.AddEvent(Event{
+				Source: fmt.Sprintf("n%d", i),
+				Target: fmt.Sprintf("n%d", (i+j+1)%100),
+			})
+		}
+	}
+	time.Sleep(500 * time.Millisecond)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		snap := e.Snapshot()
+		snap.Analyze()
+		snap.Close()
+	}
+}
+
+func BenchmarkAnalyzeWithTemporal(b *testing.B) {
+	e, _ := NewBuilder().TemporalCapacity(50).DiffusivityAlpha(0.1).Build()
+	e.Start(context.Background())
+	defer e.Stop()
+
+	// Build a 100-node ring graph with 3 edges per node
+	for i := 0; i < 100; i++ {
+		for j := 0; j < 3; j++ {
+			e.AddEvent(Event{
+				Source: fmt.Sprintf("n%d", i),
+				Target: fmt.Sprintf("n%d", (i+j+1)%100),
+			})
+		}
+	}
+	time.Sleep(500 * time.Millisecond)
+
+	// Pre-seed tension history by running Analyze once
+	snap := e.Snapshot()
+	snap.Analyze()
+	snap.Close()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		snap := e.Snapshot()
+		snap.Analyze()
+		snap.Close()
+	}
+}
+
+func BenchmarkTensionHistoryPush(b *testing.B) {
+	h := analysis.NewTensionHistory(100)
+	s := analysis.TensionSample{Tension: 0.5, Timestamp: time.Now(), Version: 1}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		h.Push(s)
+	}
+}
+
+func BenchmarkFiedlerApprox(b *testing.B) {
+	// Build a mutable graph with 100 nodes, 3 edges each
+	g := graph.New()
+	now := time.Now()
+	for i := 0; i < 100; i++ {
+		g.AddNode(&graph.NodeData{ID: fmt.Sprintf("n%d", i), FirstSeen: now, LastSeen: now})
+	}
+	for i := 0; i < 100; i++ {
+		for j := 0; j < 3; j++ {
+			g.AddEdge(fmt.Sprintf("n%d", i), fmt.Sprintf("n%d", (i+j+1)%100), 1.0, "tx", now)
+		}
+	}
+	ig := graph.NewImmutable(g)
+
+	// Collect node IDs
+	nodeIDs := make([]string, 0, 100)
+	ig.ForEachNode(func(nd *graph.NodeData) bool {
+		nodeIDs = append(nodeIDs, nd.ID)
+		return true
+	})
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		analysis.FiedlerApprox(ig, nodeIDs)
+	}
+}
+
+func BenchmarkCheckAnomaliesOverhead(b *testing.B) {
+	e, _ := NewBuilder().
+		ChannelSize(b.N + 1000).
+		TemporalCapacity(50).
+		DiffusivityAlpha(0.1).
+		TensionSpikeThreshold(0.3).
+		OnTensionSpike(func(string, float64) {}).
+		Build()
+	e.Start(context.Background())
+	defer e.Stop()
+
+	// Seed 100 nodes
+	for i := 0; i < 100; i++ {
+		e.AddEvent(Event{Source: fmt.Sprintf("n%d", i), Target: fmt.Sprintf("n%d", (i+1)%100)})
+	}
+	time.Sleep(500 * time.Millisecond)
+
+	ev := Event{Source: "n0", Target: "n1", Weight: 1.0, Timestamp: time.Now()}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		e.AddEvent(ev)
+	}
 	b.StopTimer()
 	time.Sleep(200 * time.Millisecond)
 }

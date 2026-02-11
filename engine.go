@@ -3,6 +3,7 @@ package itt
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -37,6 +38,11 @@ type Engine struct {
 	lastCompact     time.Time
 	baseMu          sync.RWMutex
 	snapshotsActive atomic.Int64
+
+	tensionHistory   map[string]*analysis.TensionHistory
+	tensionHistoryMu sync.RWMutex
+	lastTrend        map[string]Trend
+	lastTrendMu      sync.RWMutex
 }
 
 func newEngine(cfg *Builder) *Engine {
@@ -70,7 +76,24 @@ func newEngine(cfg *Builder) *Engine {
 			}
 		},
 	})
+	e.tensionHistory = make(map[string]*analysis.TensionHistory)
+	e.lastTrend = make(map[string]Trend)
+
 	e.base = graph.NewImmutableEmpty()
+	if cfg.baseGraph != nil {
+		e.base = graphFromData(cfg.baseGraph)
+	}
+	// Storage takes precedence over baseGraph
+	if cfg.storage != nil {
+		data, err := cfg.storage.Load()
+		if err != nil {
+			if cfg.logger != nil {
+				cfg.logger.Warn("failed to load from storage", "error", err)
+			}
+		} else if data != nil {
+			e.base = graphFromData(data)
+		}
+	}
 	e.lastCompact = time.Now()
 
 	return e
@@ -163,6 +186,9 @@ func (e *Engine) Snapshot() *Snapshot {
 	e.baseMu.RUnlock()
 	snap := newSnapshot(v, e.config, base)
 	snap.onClose = func() { e.snapshotsActive.Add(-1) }
+	snap.tensionHistory = e.tensionHistory
+	snap.tensionHistoryMu = &e.tensionHistoryMu
+	snap.diffusivityAlpha = e.config.diffusivityAlpha
 	return snap
 }
 
@@ -238,6 +264,18 @@ func (e *Engine) doCompact() {
 
 	e.overlayCount.Store(0)
 	e.lastCompact = time.Now()
+
+	if e.config.storage != nil {
+		e.baseMu.RLock()
+		base := e.base
+		e.baseMu.RUnlock()
+		go func() {
+			data := graphToData(base)
+			if err := e.config.storage.Save(data); err != nil {
+				e.reportError(err)
+			}
+		}()
+	}
 
 	if e.config.onCompact != nil {
 		e.safeCallback(func() {
@@ -345,6 +383,14 @@ func (e *Engine) processEvent(ev Event) {
 	_, targetExisted := current.Graph.GetNode(ev.Target)
 	_, edgeExisted := current.Graph.GetEdge(ev.Source, ev.Target)
 
+	// Capture previous edge weight before mutation
+	var previousWeight float64
+	if edgeExisted {
+		if oldEdge, ok := current.Graph.GetEdge(ev.Source, ev.Target); ok {
+			previousWeight = oldEdge.Weight
+		}
+	}
+
 	newGraph := current.Graph.WithEvent(ev.Source, ev.Target, weight, ev.Type, ev.Timestamp)
 
 	if nodeType != "" {
@@ -384,31 +430,46 @@ func (e *Engine) processEvent(ev Event) {
 	// Fire OnChange callbacks
 	if e.config.onChange != nil {
 		if !sourceExisted {
-			e.safeCallback(func() {
-				e.config.onChange(Delta{
-					Type: DeltaNodeAdded, Timestamp: ev.Timestamp,
-					Version: nextID, NodeID: ev.Source,
+			if n, ok := newGraph.GetNode(ev.Source); ok {
+				e.safeCallback(func() {
+					e.config.onChange(Delta{
+						Type: DeltaNodeAdded, Timestamp: ev.Timestamp,
+						Version: nextID, NodeID: ev.Source,
+						Node: nodeFromGraph(n),
+					})
 				})
-			})
+			}
 		}
 		if !targetExisted {
-			e.safeCallback(func() {
-				e.config.onChange(Delta{
-					Type: DeltaNodeAdded, Timestamp: ev.Timestamp,
-					Version: nextID, NodeID: ev.Target,
+			if n, ok := newGraph.GetNode(ev.Target); ok {
+				e.safeCallback(func() {
+					e.config.onChange(Delta{
+						Type: DeltaNodeAdded, Timestamp: ev.Timestamp,
+						Version: nextID, NodeID: ev.Target,
+						Node: nodeFromGraph(n),
+					})
 				})
-			})
+			}
 		}
 
-		edgeDelta := DeltaEdgeAdded
+		edgeDeltaType := DeltaEdgeAdded
 		if edgeExisted {
-			edgeDelta = DeltaEdgeUpdated
+			edgeDeltaType = DeltaEdgeUpdated
 		}
 		e.safeCallback(func() {
-			e.config.onChange(Delta{
-				Type: edgeDelta, Timestamp: ev.Timestamp,
+			d := Delta{
+				Type: edgeDeltaType, Timestamp: ev.Timestamp,
 				Version: nextID, EdgeFrom: ev.Source, EdgeTo: ev.Target,
-			})
+				Previous: previousWeight,
+			}
+			if ed, ok := newGraph.GetEdge(ev.Source, ev.Target); ok {
+				d.Edge = &Edge{
+					From: ed.From, To: ed.To, Weight: ed.Weight,
+					Type: ed.Type, Count: ed.Count,
+					FirstSeen: ed.FirstSeen, LastSeen: ed.LastSeen,
+				}
+			}
+			e.config.onChange(d)
 		})
 	}
 
@@ -454,6 +515,71 @@ func (e *Engine) checkAnomalies(g *graph.ImmutableGraph, ev Event, version uint6
 			e.config.calibrator.Observe(t)
 		}
 
+		// Push to tension history
+		e.tensionHistoryMu.Lock()
+		h, ok := e.tensionHistory[nodeID]
+		if !ok {
+			h = analysis.NewTensionHistory(e.config.temporalCapacity)
+			e.tensionHistory[nodeID] = h
+		}
+		h.Push(analysis.TensionSample{Tension: t, Timestamp: ev.Timestamp, Version: version})
+		e.tensionHistoryMu.Unlock()
+
+		// T23: Check for tension spike
+		if e.config.onTensionSpike != nil {
+			e.tensionHistoryMu.RLock()
+			if th, ok := e.tensionHistory[nodeID]; ok {
+				if prev, ok := th.Previous(); ok {
+					spikeDelta := math.Abs(t - prev.Tension)
+					if spikeDelta > e.config.tensionSpikeThreshold {
+						nid := nodeID
+						sd := spikeDelta
+						e.safeCallback(func() {
+							e.config.onTensionSpike(nid, sd)
+						})
+					}
+				}
+			}
+			e.tensionHistoryMu.RUnlock()
+		}
+
+		// T24: Determine current trend and emit DeltaTensionChanged
+		var currentTrend Trend = TrendStable
+		e.tensionHistoryMu.RLock()
+		if th, ok := e.tensionHistory[nodeID]; ok {
+			if prev, ok := th.Previous(); ok {
+				delta := t - prev.Tension
+				if delta > 0.01 {
+					currentTrend = TrendIncreasing
+				} else if delta < -0.01 {
+					currentTrend = TrendDecreasing
+				}
+			}
+		}
+		e.tensionHistoryMu.RUnlock()
+
+		// Emit DeltaTensionChanged if trend changed
+		e.lastTrendMu.Lock()
+		prevTrend, hasPrev := e.lastTrend[nodeID]
+		e.lastTrend[nodeID] = currentTrend
+		e.lastTrendMu.Unlock()
+
+		if hasPrev && currentTrend != prevTrend && e.config.onChange != nil {
+			nid := nodeID
+			tension := t
+			ts := ev.Timestamp
+			ver := version
+			e.safeCallback(func() {
+				e.config.onChange(Delta{
+					Type:      DeltaTensionChanged,
+					Timestamp: ts,
+					Version:   ver,
+					NodeID:    nid,
+					Tension:   tension,
+				})
+			})
+		}
+
 		anomaly := isAnomaly(e.config, node, t)
 
 		if anomaly {
@@ -479,14 +605,18 @@ func (e *Engine) checkAnomalies(g *graph.ImmutableGraph, ev Event, version uint6
 
 			// Also emit anomaly delta
 			if e.config.onChange != nil {
+				delta := Delta{
+					Type:      DeltaAnomalyDetected,
+					Timestamp: ev.Timestamp,
+					Version:   version,
+					NodeID:    nodeID,
+					Tension:   t,
+				}
+				if n, ok := g.GetNode(nodeID); ok {
+					delta.Node = nodeFromGraph(n)
+				}
 				e.safeCallback(func() {
-					e.config.onChange(Delta{
-						Type:      DeltaAnomalyDetected,
-						Timestamp: ev.Timestamp,
-						Version:   version,
-						NodeID:    nodeID,
-						Tension:   t,
-					})
+					e.config.onChange(delta)
 				})
 			}
 		}
@@ -524,4 +654,61 @@ func (e *Engine) reportError(err error) {
 	if err != nil && e.config.onError != nil {
 		e.safeCallback(func() { e.config.onError(err) })
 	}
+}
+
+// graphFromData converts GraphData to an ImmutableGraph.
+func graphFromData(data *GraphData) *graph.ImmutableGraph {
+	g := graph.New()
+	for _, n := range data.Nodes {
+		g.AddNode(&graph.NodeData{
+			ID:        n.ID,
+			Type:      n.Type,
+			Degree:    n.Degree,
+			InDegree:  n.InDegree,
+			OutDegree: n.OutDegree,
+			FirstSeen: n.FirstSeen,
+			LastSeen:  n.LastSeen,
+		})
+	}
+	for _, ed := range data.Edges {
+		g.AddEdge(ed.From, ed.To, ed.Weight, ed.Type, ed.FirstSeen)
+		// Fix up count and LastSeen to match the original data.
+		if ge, ok := g.GetEdge(ed.From, ed.To); ok {
+			ge.Count = ed.Count
+			ge.LastSeen = ed.LastSeen
+		}
+	}
+	return graph.NewImmutable(g)
+}
+
+// graphToData converts an ImmutableGraph to GraphData.
+func graphToData(ig *graph.ImmutableGraph) *GraphData {
+	data := &GraphData{
+		Timestamp: time.Now(),
+	}
+	ig.ForEachNode(func(n *graph.NodeData) bool {
+		data.Nodes = append(data.Nodes, &Node{
+			ID:        n.ID,
+			Type:      n.Type,
+			Degree:    n.Degree,
+			InDegree:  n.InDegree,
+			OutDegree: n.OutDegree,
+			FirstSeen: n.FirstSeen,
+			LastSeen:  n.LastSeen,
+		})
+		return true
+	})
+	ig.ForEachEdge(func(ed *graph.EdgeData) bool {
+		data.Edges = append(data.Edges, &Edge{
+			From:      ed.From,
+			To:        ed.To,
+			Weight:    ed.Weight,
+			Type:      ed.Type,
+			Count:     ed.Count,
+			FirstSeen: ed.FirstSeen,
+			LastSeen:  ed.LastSeen,
+		})
+		return true
+	})
+	return data
 }
