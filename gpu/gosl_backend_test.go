@@ -47,24 +47,24 @@ func TestBackend_AnalyzeTensions_Parity(t *testing.T) {
 		{"C", "A", 0.4},
 	})
 
-	// GPU backend
+	// GPU backend (float32)
 	gpuTensions, err := backend.AnalyzeTensions(ig)
 	if err != nil {
 		t.Fatalf("AnalyzeTensions failed: %v", err)
 	}
 
-	// CPU reference
+	// CPU reference (float64)
 	tc := analysis.NewTensionCalculator(analysis.JSD{})
 	cpuTensions := tc.CalculateAll(ig)
 
-	// Parity check
+	// Parity check — relaxed for float32 backend
 	for nodeID, cpuT := range cpuTensions {
 		gpuT, ok := gpuTensions[nodeID]
 		if !ok {
 			t.Fatalf("node %q missing from GPU results", nodeID)
 		}
-		if math.Abs(cpuT-gpuT) > parityEpsilon {
-			t.Errorf("node %q: cpu=%.15f gpu=%.15f", nodeID, cpuT, gpuT)
+		if math.Abs(cpuT-gpuT) > parityEpsilonF32 {
+			t.Errorf("node %q: cpu=%.15f gpu=%.15f diff=%.2e", nodeID, cpuT, gpuT, math.Abs(cpuT-gpuT))
 		}
 	}
 }
@@ -98,20 +98,25 @@ func TestBackend_AnalyzeTensions_LargeGraph(t *testing.T) {
 	cpuTensions := tc.CalculateAll(ig)
 
 	mismatches := 0
+	maxDiff := 0.0
 	for nodeID, cpuT := range cpuTensions {
 		gpuT := gpuTensions[nodeID]
-		if math.Abs(cpuT-gpuT) > parityEpsilon {
+		diff := math.Abs(cpuT - gpuT)
+		if diff > maxDiff {
+			maxDiff = diff
+		}
+		if diff > parityEpsilonF32 {
 			mismatches++
 			if mismatches <= 5 {
 				t.Errorf("node %q: cpu=%.15f gpu=%.15f diff=%.2e",
-					nodeID, cpuT, gpuT, math.Abs(cpuT-gpuT))
+					nodeID, cpuT, gpuT, diff)
 			}
 		}
 	}
 	if mismatches > 0 {
 		t.Errorf("total mismatches: %d / %d nodes", mismatches, len(cpuTensions))
 	}
-	t.Logf("Parity verified: %d nodes, 0 mismatches", len(cpuTensions))
+	t.Logf("Parity verified: %d nodes, 0 mismatches, max diff=%.2e", len(cpuTensions), maxDiff)
 }
 
 func TestBackend_CloseIdempotent(t *testing.T) {
@@ -202,6 +207,32 @@ func BenchmarkBackend_AnalyzeTensions_1k(b *testing.B) {
 		}
 	}
 	ig := graph.NewImmutable(g)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		backend.AnalyzeTensions(ig)
+	}
+}
+
+func BenchmarkBackend_AnalyzeTensions_5k(b *testing.B) {
+	backend, _ := gpu.NewGoSLBackend()
+	defer backend.Close()
+	ig := buildLargeGraph(5000, 10)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		backend.AnalyzeTensions(ig)
+	}
+}
+
+func BenchmarkBackend_AnalyzeTensions_10k(b *testing.B) {
+	backend, _ := gpu.NewGoSLBackend()
+	defer backend.Close()
+	ig := buildLargeGraph(10000, 10)
 
 	b.ResetTimer()
 	b.ReportAllocs()

@@ -69,8 +69,8 @@ type GraphView interface {
 //
 // Contract:
 //   - [Available] must be callable at any time without side effects.
-//   - [AnalyzeTensions] must return results identical to [analysis.TensionCalculator.CalculateAll]
-//     within ε = 1e-10 (floating-point tolerance).
+//   - [AnalyzeTensions] must return results consistent with [analysis.TensionCalculator.CalculateAll].
+//     Float64 backends: ε = 1e-10. Float32 backends (e.g. GPU/WGSL): ε = 1e-5.
 //   - [Close] must be idempotent — calling it multiple times is safe.
 //   - If any method returns an error, the engine will fall back to CPU transparently.
 type ComputeBackend interface {
@@ -87,7 +87,8 @@ type ComputeBackend interface {
 	// AnalyzeTensions computes JSD-based tension for all nodes in the graph.
 	//
 	// The returned map must contain an entry for every node in the graph.
-	// Values must match TensionCalculator.CalculateAll within ε = 1e-10.
+	// Values must match TensionCalculator.CalculateAll within the backend's
+	// precision tolerance (float64: ε=1e-10, float32/GPU: ε=1e-5).
 	//
 	// Implementations should:
 	//  1. Serialize the graph to GPU-friendly format (CSR/CSC).

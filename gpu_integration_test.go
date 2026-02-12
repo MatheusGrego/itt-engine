@@ -128,7 +128,8 @@ func TestGPU_AnalyzeRoutesToGPU_AboveThreshold(t *testing.T) {
 		t.Fatalf("CPU Analyze failed: %v", err)
 	}
 
-	// Compare tension values
+	// Compare tension values — relaxed tolerance for float32 GPU backend
+	const gpuParityEpsilon = 1e-5
 	gpuMap := make(map[string]float64)
 	for _, tr := range results.Tensions {
 		gpuMap[tr.NodeID] = tr.Tension
@@ -139,8 +140,8 @@ func TestGPU_AnalyzeRoutesToGPU_AboveThreshold(t *testing.T) {
 			t.Errorf("node %q missing from GPU results", tr.NodeID)
 			continue
 		}
-		if math.Abs(tr.Tension-gpuT) > 1e-10 {
-			t.Errorf("node %q: cpu=%.15f gpu=%.15f", tr.NodeID, tr.Tension, gpuT)
+		if math.Abs(tr.Tension-gpuT) > gpuParityEpsilon {
+			t.Errorf("node %q: cpu=%.15f gpu=%.15f diff=%.2e", tr.NodeID, tr.Tension, gpuT, math.Abs(tr.Tension-gpuT))
 		}
 	}
 }
