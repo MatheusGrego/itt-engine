@@ -790,37 +790,49 @@ func TestEngine_GPUDisabled(t *testing.T) {
 
 ## Milestones
 
-### Milestone 1: Foundation
-- [ ] Create branch `feature/gpu-acceleration`
-- [ ] Add `cogentcore/lab/gosl` dependency
-- [ ] Create `gpu/backend.go` — `ComputeBackend` interface
-- [ ] Create `gpu/serialize.go` — CSR + CSC serialization
-- [ ] Create `gpu/serialize_test.go` — roundtrip tests
+### Milestone 1: Foundation -- DONE
+- [x] Create branch `feature/gpu-acceleration`
+- [x] Create `gpu/backend.go` — `ComputeBackend` interface (design change: `gpu.GraphView` re-declared, see below)
+- [x] Create `gpu/serialize.go` — CSR + CSC serialization (design change: deterministic sorted ordering)
+- [x] Create `gpu/serialize_test.go` — 12 tests + 3 benchmarks
+- [ ] ~~Add `cogentcore/lab/gosl` dependency~~ (deferred to Milestone 5, see design change 3)
 
 **Deliverable**: Pure-Go serialization passing tests. No GPU needed yet.
 
-### Milestone 2: GoSL Kernel + Backend
-- [ ] Create `gpu/jsd_kernel.go` — JSD tension kernel in Go/GoSL
-- [ ] Create `gpu/gosl_backend.go` — WebGPU compute dispatch
-- [ ] Parity test: CPU vs GPU tensions (ε = 1e-10)
+### Milestone 2: GoSL Kernel + Backend -- DONE
+- [x] Create `gpu/jsd_kernel.go` — JSD tension kernel in Go (design change: exact perturbation algorithm, not simplified)
+- [x] Create `gpu/jsd_kernel_test.go` — 12 parity tests + 2 benchmarks (10 graph topologies, ε=1e-10)
+- [x] Create `gpu/gosl_backend.go` — GoSLBackend (CPU-reference mode, thread-safe)
+- [x] Create `gpu/gosl_backend_test.go` — 9 tests + 2 benchmarks
+- [x] Parity verified: CPU vs GPU tensions across 10 graph shapes (ε = 1e-10, zero mismatches)
 
-**Deliverable**: GPU computes same tensions as CPU for 1k node graph.
+**Deliverable**: Kernel computes same tensions as CPU for all tested graph topologies (up to 500 nodes).
 
-### Milestone 3: Engine Integration
-- [ ] Modify `builder.go` — `WithGPU()`, `WithGPUBackend()`
-- [ ] Modify `snapshot.go` — GPU routing in `Analyze()` via `computeTensions()`
-- [ ] Modify `engine.go` — GPU cleanup on shutdown
-- [ ] Fallback: GPU error → CPU silently
+### Milestone 3: Engine Integration -- DONE
+- [x] Modify `builder.go` — `WithGPU(threshold)`, `WithGPUBackend(backend, threshold)` (design change: explicit threshold)
+- [x] Modify `snapshot.go` — GPU routing in `Analyze()` via `computeTensions()` (design change: Snapshot method)
+- [x] Modify `engine.go` — GPU cleanup on shutdown (`Stop()` calls `gpuBackend.Close()`)
+- [x] Fallback: GPU error → CPU silently (logged if logger configured)
+- [x] 9 integration tests covering routing, parity, fallback, lifecycle
 
-**Deliverable**: `itt.NewBuilder().WithGPU(1000).Build()` works end-to-end.
+**Deliverable**: `itt.NewBuilder().WithGPU(1000).Build()` works end-to-end. All 284 tests pass.
 
-### Milestone 4: Tests & Benchmarks
-- [ ] Full test suite passes (`go test ./...`)
-- [ ] Benchmark CPU vs GoSL (100, 1k, 10k nodes)
-- [ ] Update docs/plans/ with actual results
+### Milestone 4: Tests & Benchmarks -- PENDING
+- [x] Full test suite passes (`go test ./...`) — 284 tests across 8 packages
+- [ ] Benchmark CPU vs GPU routing (100, 500, 1k nodes)
+- [ ] Update this document with actual benchmark numbers
 - [ ] Add GPU section to README.md
 
-**Deliverable**: Benchmark numbers proving speedup. Documentation updated.
+**Deliverable**: Benchmark numbers, documentation updated.
+
+### Milestone 5: Wire GoSL (future)
+- [ ] Add `cogentcore.org/lab/gosl` to `go.mod`
+- [ ] Replace CPU loop in `GoSLBackend.AnalyzeTensions()` with `gpu.Dispatch()`
+- [ ] Add `//gosl:start` / `//gosl:end` annotations to `jsd_kernel.go`
+- [ ] Benchmark on actual GPU (RTX 2060)
+- [ ] Implement `FiedlerApprox` on GPU
+
+**Deliverable**: Actual GPU execution with measured speedup numbers.
 
 ---
 
@@ -904,4 +916,178 @@ Cold start:          ~75ms (vs 1.5s CPU, vs 10s sequential)
 
 ---
 
-**Status**: Plan Complete — Ready for Implementation
+**Status**: Milestones 1-3 Complete — CPU-reference mode. Milestone 4 (benchmarks + docs) pending.
+
+---
+
+## Implementation Status
+
+### Milestone Progress
+
+| Milestone | Status | Commit | Notes |
+|---|---|---|---|
+| **1: Foundation** | **Done** | `5c91aa3` | ComputeBackend interface, CSR/CSC serialization, 12 tests + 3 benchmarks |
+| **2: Kernel + Backend** | **Done** | `ecfaacc` | JSD kernel with exact CPU parity (10 graph shapes, ε=1e-10), GoSL backend (CPU-reference), 33 GPU tests total |
+| **3: Engine Integration** | **Done** | `b662979` | WithGPU/WithGPUBackend, computeTensions router, GPU cleanup on Stop, graceful fallback, 9 integration tests |
+| **4: Tests & Benchmarks** | **Pending** | — | Final benchmarks, docs update, README GPU section |
+
+### Test Inventory
+
+| File | Tests | Benchmarks | Coverage |
+|---|---|---|---|
+| `gpu/serialize_test.go` | 12 | 3 | CSR/CSC: empty, triangle, weights, self-loop, disconnected, bidirectional, deterministic ordering, 1k nodes |
+| `gpu/jsd_kernel_test.go` | 12 | 2 | Parity: triangle, bidirectional, star, chain, fully-connected, unequal weights, self-loop, disconnected, single-edge, 200-node random. Unit: isolated node, out-of-range |
+| `gpu/gosl_backend_test.go` | 9 | 2 | Interface compliance, init/deviceInfo, parity (4-node + 500-node), empty graph, close idempotent, analyze-after-close, concurrent (10 goroutines), FiedlerApprox not-implemented |
+| `gpu_integration_test.go` | 9 | 0 | Builder: WithGPU, zero-threshold, injection, negative-threshold. Routing: above/below threshold, CPU/GPU parity. Lifecycle: Stop closes backend. Fallback: GPU error → CPU. AnalyzeNode stays CPU |
+| **Total** | **42** | **7** | |
+
+### What Was Delivered
+
+```
+gpu/
+├── backend.go           # ComputeBackend interface, GraphView, DeviceInfo, sentinel errors
+├── serialize.go         # SerializeCSR + SerializeCSC (deterministic, sorted)
+├── serialize_test.go    # 12 tests + 3 benchmarks
+├── jsd_kernel.go        # ComputeNodeTension, ComputeAllTensions, JSD/KL helpers
+├── jsd_kernel_test.go   # 12 parity tests + 2 benchmarks
+├── gosl_backend.go      # GoSLBackend (CPU-reference mode)
+├── gosl_backend_test.go # 9 tests + 2 benchmarks
+└── helpers_test.go      # buildGraph, buildLargeGraph, nodeID
+
+gpu_integration_test.go  # 9 engine-level GPU routing tests
+
+builder.go               # +gpuBackend, +gpuThreshold, +WithGPU(), +WithGPUBackend()
+snapshot.go              # +computeTensions() router, +gpu import
+engine.go                # +gpuBackend.Close() in Stop()
+```
+
+### Current Mode: CPU-Reference
+
+The entire GPU pipeline is wired and tested, but runs on CPU. The `GoSLBackend` executes the JSD kernel as pure Go — the same flat-array code that GoSL will transpile to WGSL.
+
+```
+Current flow:
+  Analyze() → computeTensions() → GoSLBackend.AnalyzeTensions()
+    → SerializeCSR/CSC → ComputeAllTensions (CPU loop) → map back to node IDs
+
+Future flow (GoSL wired):
+  Analyze() → computeTensions() → GoSLBackend.AnalyzeTensions()
+    → SerializeCSR/CSC → gpu.Upload() → gpu.Dispatch() → gpu.ReadBack() → map back
+```
+
+Only `gosl_backend.go` changes when the GoSL dependency is added. Everything else (kernel, serialization, engine integration, tests) stays identical.
+
+---
+
+## Design Changes from Original Plan
+
+### Change 1: `gpu.GraphView` re-declared instead of importing `analysis.GraphView`
+
+**Plan**: `gpu/backend.go` imports `analysis` and uses `analysis.GraphView` directly.
+
+**Implementation**: `gpu.GraphView` is re-declared in `gpu/backend.go` using `*graph.NodeData` / `*graph.EdgeData`.
+
+**Why**: Avoids `gpu → analysis` dependency. The `gpu` package depends only on `graph` (leaf types). Go structural typing guarantees that `*graph.ImmutableGraph` and `*graph.UnifiedView` satisfy both `analysis.GraphView` and `gpu.GraphView` without any adapter. Cleaner dependency graph:
+
+```
+Before (planned):     gpu → analysis → graph
+After (implemented):  gpu → graph
+                      analysis → graph
+```
+
+### Change 2: JSD kernel uses exact perturbation algorithm (not simplified P/Q)
+
+**Plan**: Kernel used a simplified approach — P = normalized outgoing weights, Q = uniform reference. Computed `JSD(P, Q_uniform)`.
+
+**Implementation**: Kernel exactly replicates `analysis.TensionCalculator.Calculate()` — the **neighbor-perturbation** algorithm:
+1. Collect all neighbors (in + out union, deduplicated)
+2. For each neighbor, build its outgoing weight distribution
+3. Zero out the edge to the target node, re-normalize
+4. Compute JSD(original, perturbed)
+5. Return mean divergence across all contributing neighbors
+
+**Why**: The simplified version would produce **different results** from the CPU TensionCalculator. The parity requirement (ε = 1e-10) demands identical algorithms. The perturbation approach is the actual ITT definition of informational tension. Verified across 10 graph topologies with zero mismatches.
+
+### Change 3: GoSL dependency not added yet (CPU-reference mode)
+
+**Plan**: Milestone 2 adds `cogentcore.org/lab/gosl` and runs on GPU.
+
+**Implementation**: GoSLBackend runs the kernel on CPU. No external dependency added.
+
+**Why**: This is deliberate phasing. The architecture (interface, serialization, kernel, integration) is fully proven and tested without the GoSL dependency. Adding GoSL is a localized change to `gosl_backend.go` only — swap the `ComputeAllTensions` CPU loop for `gpu.Dispatch()`. This avoids coupling GoSL API stability risks to architectural decisions.
+
+### Change 4: Deterministic serialization with sorted ordering
+
+**Plan**: CSR used `ForEachNode` iteration order (non-deterministic, depends on map iteration).
+
+**Implementation**: Node IDs are sorted alphabetically before indexing. Edges within each CSR row and CSC column are also sorted by target index.
+
+**Why**: Deterministic ordering is required for: (a) reproducible test results, (b) coalesced GPU memory access patterns (sorted column indices improve cache hit rates on GPU), (c) consistent cache keys if CSR data is ever cached.
+
+### Change 5: `WithGPUBackend` takes explicit threshold
+
+**Plan**: `WithGPUBackend(backend)` with auto-default threshold of 1000.
+
+**Implementation**: `WithGPUBackend(backend, threshold)` — explicit second parameter.
+
+**Why**: Hidden defaults are surprising. The caller should decide the routing threshold based on their workload characteristics. `WithGPU(threshold)` handles the common case (auto-detect + explicit threshold). `WithGPUBackend(backend, threshold)` is for test injection and alternative backends — these callers always know what threshold they want.
+
+### Change 6: `computeTensions` is a Snapshot method, not a free function
+
+**Plan**: `computeTensions(tc, gv, workers)` as a function receiving all parameters.
+
+**Implementation**: `computeTensions(gv, tc)` as a method on `*Snapshot`. Workers are read from `s.config.parallelWorkers` internally.
+
+**Why**: As a method, it has direct access to `s.config` (gpuBackend, gpuThreshold, parallelWorkers, logger). No need to pass all configuration as parameters. The GPU type assertion `gv.(gpu.GraphView)` uses comma-ok pattern for safety.
+
+### Change 7: Thread-safe GoSLBackend with mutex
+
+**Plan**: No mention of concurrency in GoSLBackend.
+
+**Implementation**: `sync.Mutex` protects all mutable state in GoSLBackend. `closed` and `available` flags are guarded.
+
+**Why**: Multiple snapshots may call `AnalyzeTensions` concurrently from different goroutines. WebGPU command queues are not thread-safe — the mutex ensures serialized dispatch. Also prevents use-after-close races.
+
+### Change 8: GPU routing only for `Analyze()`, not `AnalyzeNode()` / `AnalyzeRegion()`
+
+**Plan**: Not specified — implied all analysis methods.
+
+**Implementation**: Only `Analyze()` (full-graph) routes to GPU. `AnalyzeNode()` and `AnalyzeRegion()` always use CPU.
+
+**Why**: GPU overhead (serialize + upload + dispatch + readback) is ~1-5ms minimum. Single-node analysis on CPU takes ~1.2μs. Region analysis typically covers a small subset. The crossover point is ~2-5k nodes — only full-graph `Analyze()` benefits.
+
+### Change 9: `CSRGraph.NodeIdx` field added
+
+**Plan**: CSR had `NodeIDs []string` only. CSC construction required a separate `nodeIndex map[string]int`.
+
+**Implementation**: `CSRGraph` includes `NodeIdx map[string]int` alongside `NodeIDs []string`.
+
+**Why**: Avoids rebuilding the index map every time CSC is constructed. The map is already computed during CSR serialization — exposing it saves an O(n) allocation. Used by both `SerializeCSC` and the parity test helpers.
+
+---
+
+## Next Steps
+
+### Milestone 4: Tests & Benchmarks (immediate)
+
+- [ ] Add GPU vs CPU benchmarks in `gpu_integration_test.go` (100, 500, 1k nodes)
+- [ ] Add benchmark comparing `Analyze()` with GPU routing vs CPU-only
+- [ ] Update this document with actual benchmark numbers
+- [ ] Add GPU section to `README.md` with usage examples
+
+### Milestone 5: Wire GoSL (when dependency is added)
+
+- [ ] Add `cogentcore.org/lab/gosl` to `go.mod`
+- [ ] Replace CPU loop in `GoSLBackend.AnalyzeTensions()` with `gpu.Dispatch()`
+- [ ] Add `//gosl:start` / `//gosl:end` annotations to `jsd_kernel.go`
+- [ ] Run parity tests on actual GPU (RTX 2060)
+- [ ] Benchmark real GPU vs CPU and update performance tables
+- [ ] Implement `FiedlerApprox` on GPU (inverse power iteration kernel)
+
+### Future Optimizations
+
+- [ ] **Batch serialization cache**: Cache CSR/CSC between consecutive `Analyze()` calls on the same version (avoids re-serializing unchanged graphs)
+- [ ] **Pinned memory**: Use pinned (page-locked) host memory for faster PCIe transfers
+- [ ] **Async dispatch**: Overlap GPU compute with CPU post-processing (curvature, concealment)
+- [ ] **Multi-GPU**: Partition large graphs across multiple GPUs
+- [ ] **Float32 fast path**: Optional float32 mode for graphs where precision can be relaxed (non-anomaly workloads)
