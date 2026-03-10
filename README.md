@@ -674,4 +674,4 @@ Benchmarked on AMD Ryzen 5 3600:
 
 ## License
 
-MIT
+BSL 1.1
