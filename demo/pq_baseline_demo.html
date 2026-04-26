@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ITT — P_eq Counterfactual Baseline Demo</title>
+<style>
+  :root {
+    --bg: #0e0e10;
+    --panel: #161618;
+    --panel-2: #1d1d20;
+    --border: #2a2a2e;
+    --text: #e5e5e7;
+    --text-2: #a0a0a8;
+    --text-3: #6a6a72;
+    --accent: #E24B4A;
+    --mono: ui-monospace, "SF Mono", Menlo, Monaco, "Cascadia Code", monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.5;
+  }
+  .container {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 32px 20px 64px;
+  }
+  h1 {
+    font-size: 22px;
+    font-weight: 500;
+    margin: 0 0 8px;
+  }
+  .subtitle {
+    color: var(--text-2);
+    font-size: 14px;
+    margin-bottom: 28px;
+  }
+  .intro {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-bottom: 24px;
+    font-size: 13.5px;
+    color: var(--text-2);
+  }
+  .intro strong { color: var(--text); font-weight: 500; }
+  .intro code {
+    background: var(--panel-2);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text);
+  }
+  canvas {
+    display: block;
+    margin: 0 auto;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: #050510;
+    max-width: 100%;
+    cursor: crosshair;
+  }
+  .controls {
+    margin-top: 24px;
+  }
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .row label {
+    font-size: 13px;
+    color: var(--text-2);
+    min-width: 130px;
+  }
+  .row input[type="range"] {
+    flex: 1;
+    accent-color: var(--accent);
+  }
+  .row .val {
+    font-size: 14px;
+    font-weight: 500;
+    min-width: 54px;
+    text-align: right;
+    font-family: var(--mono);
+    color: var(--text);
+  }
+  .buttons {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  .buttons button {
+    flex: 1;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-size: 12px;
+    padding: 9px 4px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 0.1s, border-color 0.1s;
+  }
+  .buttons button:hover { background: var(--panel-2); }
+  .buttons button.active {
+    background: var(--panel-2);
+    border-color: #3a3a40;
+  }
+  .desc {
+    font-size: 12px;
+    color: var(--text-3);
+    text-align: center;
+    margin-bottom: 16px;
+    min-height: 14px;
+  }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-top: 16px;
+  }
+  .stat {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 8px;
+    text-align: center;
+  }
+  .stat span {
+    font-size: 11px;
+    color: var(--text-2);
+    display: block;
+    margin-bottom: 4px;
+  }
+  .stat strong {
+    color: var(--text);
+    font-weight: 500;
+    font-size: 16px;
+    font-family: var(--mono);
+  }
+  footer {
+    margin-top: 32px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text-3);
+    text-align: center;
+  }
+  footer code {
+    font-family: var(--mono);
+    color: var(--text-2);
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>P_eq as Geometric Counterfactual Baseline</h1>
+<div class="subtitle">Visual validation — ITT applied to a 2D toy black hole</div>
+
+<div class="intro">
+This is a visual demonstration of a reformulation of <strong>P_eq</strong> in
+Informational Tension Theory (ITT). Instead of defining the baseline as
+uniform maximum entropy, define it as <strong>the same system with the
+perturbation source removed</strong>. Here:
+<br><br>
+<code>P_obs</code> = light rays under gravity (deflected) &nbsp;·&nbsp;
+<code>P_eq</code> = same rays without gravity (straight lines) &nbsp;·&nbsp;
+<code>τ = JSD(P_obs ∥ P_eq)</code>
+<br><br>
+Toggle the layer buttons to view each field. The τ peak should coincide with
+the photon sphere (orange dashed ring) — a geometrically invariant feature,
+not an artifact of how rays were injected.
+<br><br>
+<strong>Click</strong> on the canvas to launch a single ray going right.
+<strong>Click and drag</strong> to set a custom direction and speed (drag distance = speed).
+Each launched ray creates both an observed (with gravity) and expected (without gravity) twin.
+</div>
+
+<canvas id="bh-canvas" width="580" height="420"></canvas>
+
+<div class="controls">
+
+  <div style="font-size: 12px; color: var(--text-2); margin-bottom: 8px;">camada visualizada:</div>
+  <div class="buttons">
+    <button id="lay-obs">P_obs (observed)</button>
+    <button id="lay-eq">P_eq (expected)</button>
+    <button id="lay-tau" class="active">τ (divergence)</button>
+    <button id="lay-all">all layers</button>
+  </div>
+  <div class="desc" id="layer-desc">τ = where observed and expected diverge. This is the true tension field.</div>
+
+  <div class="row">
+    <label>black hole mass</label>
+    <input type="range" id="mass" min="40" max="220" step="2" value="120">
+    <span class="val" id="mass-val">120</span>
+  </div>
+
+  <div class="row">
+    <label>auto-spawn rate</label>
+    <input type="range" id="rate" min="0" max="40" step="1" value="0">
+    <span class="val" id="rate-val">0</span>
+  </div>
+
+  <div class="buttons">
+    <button id="clear">clear</button>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><span>captured</span><strong id="stat-cap">0</strong></div>
+    <div class="stat"><span>τ peak at</span><strong id="stat-peak">—</strong></div>
+    <div class="stat"><span>photon sphere</span><strong id="stat-photon">—</strong></div>
+  </div>
+
+</div>
+
+<footer>
+ITT Engine — P_eq counterfactual baseline visualization &nbsp;·&nbsp;
+Companion to <code>PQ_COUNTERFACTUAL_BASELINE.md</code>
+</footer>
+
+</div>
+
+<script>
+(function() {
+  const canvas = document.getElementById('bh-canvas');
+  const W = canvas.width, H = canvas.height;
+  const ctx = canvas.getContext('2d');
+
+  const cx = W * 0.55;
+  const cy = H / 2;
+  let M = 120;
+  let r_horizon = 0;
+  let raysPerSec = 0;
+  let layer = 'tau';
+
+  function updateRadii() {
+    r_horizon = Math.sqrt(M) * 2.2;
+    document.getElementById('stat-photon').textContent = (r_horizon * 1.5).toFixed(0) + 'px';
+  }
+  updateRadii();
+
+  let raysObs = [];
+  let raysEq = [];
+  let captured = 0;
+
+  // Drag state for manual ray placement
+  let dragging = false;
+  let dragStart = null;
+  let dragCurrent = null;
+
+  const GW = 58, GH = 42;
+  const cellW = W / GW, cellH = H / GH;
+  let obsField = new Float32Array(GW*GH);
+  let eqField = new Float32Array(GW*GH);
+  let tauField = new Float32Array(GW*GH);
+
+  function spawnRayPair(x, y, vx, vy) {
+    raysObs.push({ x, y, vx, vy, trail: [{x,y}], alive: true, captured: false, manual: true });
+    raysEq.push({ x, y, vx, vy, trail: [{x,y}], alive: true });
+  }
+
+  function autoSpawn() {
+    const y = Math.random() * H;
+    const speed = 2.6;
+    raysObs.push({ x: 0, y, vx: speed, vy: 0, trail: [{x:0,y}], alive: true, captured: false, manual: false });
+    raysEq.push({ x: 0, y, vx: speed, vy: 0, trail: [{x:0,y}], alive: true });
+  }
+
+  let lastSpawn = 0;
+  let lastTime = 0;
+
+  function update(dt) {
+    const dtSim = Math.min(dt * 0.06, 1.5);
+    const sub = 5;
+    const dts = dtSim / sub;
+
+    for (const ray of raysObs) {
+      if (!ray.alive) continue;
+      for (let s = 0; s < sub; s++) {
+        const dx = cx - ray.x, dy = cy - ray.y;
+        const r2 = dx*dx + dy*dy, r = Math.sqrt(r2);
+        if (r < r_horizon) { ray.captured = true; ray.alive = false; captured++; break; }
+        if (ray.x > W + 30 || ray.x < -30 || ray.y > H + 30 || ray.y < -30) { ray.alive = false; break; }
+        const a = M / r2 + (M*M*8) / (r2*r2);
+        ray.vx += a * dx/r * dts;
+        ray.vy += a * dy/r * dts;
+        ray.x += ray.vx * dts;
+        ray.y += ray.vy * dts;
+      }
+      if (ray.alive) {
+        ray.trail.push({x: ray.x, y: ray.y});
+        if (ray.trail.length > 200) ray.trail.shift();
+        const gx = Math.floor(ray.x/cellW), gy = Math.floor(ray.y/cellH);
+        if (gx >= 0 && gx < GW && gy >= 0 && gy < GH) obsField[gy*GW + gx] += 1;
+      }
+    }
+
+    for (const ray of raysEq) {
+      if (!ray.alive) continue;
+      ray.x += ray.vx * dtSim;
+      ray.y += ray.vy * dtSim;
+      if (ray.x > W + 30) { ray.alive = false; continue; }
+      ray.trail.push({x: ray.x, y: ray.y});
+      if (ray.trail.length > 200) ray.trail.shift();
+      const gx = Math.floor(ray.x/cellW), gy = Math.floor(ray.y/cellH);
+      if (gx >= 0 && gx < GW && gy >= 0 && gy < GH) eqField[gy*GW + gx] += 1;
+    }
+
+    raysObs = raysObs.filter(r => r.alive || r.trail.length > 0);
+    raysEq = raysEq.filter(r => r.alive || r.trail.length > 0);
+    for (const r of raysObs) if (!r.alive) r.trail.shift();
+    for (const r of raysEq) if (!r.alive) r.trail.shift();
+
+    for (let i = 0; i < GW*GH; i++) {
+      obsField[i] *= 0.985;
+      eqField[i] *= 0.985;
+    }
+  }
+
+  function jsd(p, q) {
+    if (p <= 0 && q <= 0) return 0;
+    const total = p + q;
+    if (total <= 0) return 0;
+    const pn = p/total, qn = q/total;
+    const m = 0.5;
+    let s = 0;
+    if (pn > 0.001) s += pn * Math.log2(pn / m);
+    if (qn > 0.001) s += qn * Math.log2(qn / m);
+    return Math.max(0, s/2);
+  }
+
+  function computeTau() {
+    let maxT = 0, peakX = 0, peakY = 0;
+    let obsTotal = 0, eqTotal = 0;
+    for (let i = 0; i < GW*GH; i++) { obsTotal += obsField[i]; eqTotal += eqField[i]; }
+    if (obsTotal < 1 || eqTotal < 1) return;
+
+    for (let gy = 0; gy < GH; gy++) {
+      for (let gx = 0; gx < GW; gx++) {
+        const gi = gy*GW + gx;
+        const pO = obsField[gi] / obsTotal;
+        const pE = eqField[gi] / eqTotal;
+        const t = jsd(pO * 1000, pE * 1000);
+        tauField[gi] = tauField[gi] * 0.7 + t * 0.3;
+        if (tauField[gi] > maxT) {
+          maxT = tauField[gi];
+          peakX = gx*cellW + cellW/2;
+          peakY = gy*cellH + cellH/2;
+        }
+      }
+    }
+    if (maxT > 0.001) {
+      const peakDist = Math.sqrt((peakX-cx)**2 + (peakY-cy)**2);
+      const photonR = r_horizon * 1.5;
+      const ratio = (peakDist / photonR).toFixed(2);
+      document.getElementById('stat-peak').textContent = peakDist.toFixed(0) + 'px (' + ratio + 'x)';
+    }
+  }
+
+  function render() {
+    ctx.fillStyle = 'rgba(5, 5, 16, 0.20)';
+    ctx.fillRect(0, 0, W, H);
+
+    if (layer === 'obs' || layer === 'all') {
+      let maxV = 0; for (let i = 0; i < GW*GH; i++) if (obsField[i] > maxV) maxV = obsField[i];
+      if (maxV > 0.1) {
+        for (let gy = 0; gy < GH; gy++) for (let gx = 0; gx < GW; gx++) {
+          const v = obsField[gy*GW + gx] / maxV;
+          if (v > 0.05) {
+            ctx.fillStyle = 'rgba(140, 200, 255, ' + Math.min(v * 0.4, 0.5) + ')';
+            ctx.fillRect(gx*cellW, gy*cellH, cellW+0.5, cellH+0.5);
+          }
+        }
+      }
+    }
+
+    if (layer === 'eq' || layer === 'all') {
+      let maxV = 0; for (let i = 0; i < GW*GH; i++) if (eqField[i] > maxV) maxV = eqField[i];
+      if (maxV > 0.1) {
+        for (let gy = 0; gy < GH; gy++) for (let gx = 0; gx < GW; gx++) {
+          const v = eqField[gy*GW + gx] / maxV;
+          if (v > 0.05) {
+            ctx.fillStyle = 'rgba(120, 220, 140, ' + Math.min(v * 0.35, 0.45) + ')';
+            ctx.fillRect(gx*cellW, gy*cellH, cellW+0.5, cellH+0.5);
+          }
+        }
+      }
+    }
+
+    if (layer === 'tau' || layer === 'all') {
+      let maxV = 0; for (let i = 0; i < GW*GH; i++) if (tauField[i] > maxV) maxV = tauField[i];
+      if (maxV > 0.001) {
+        for (let gy = 0; gy < GH; gy++) for (let gx = 0; gx < GW; gx++) {
+          const v = tauField[gy*GW + gx] / maxV;
+          if (v > 0.08) {
+            ctx.fillStyle = 'rgba(226, 75, 74, ' + Math.min(v * 0.85, 0.7) + ')';
+            ctx.fillRect(gx*cellW, gy*cellH, cellW+0.5, cellH+0.5);
+          }
+        }
+      }
+    }
+
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 4]);
+    ctx.strokeStyle = 'rgba(255, 200, 100, 0.7)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, r_horizon * 1.5, 0, Math.PI*2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.lineWidth = 0.8;
+    if (layer === 'obs' || layer === 'all') {
+      for (const ray of raysObs) {
+        if (ray.trail.length < 2) continue;
+        ctx.beginPath();
+        ctx.moveTo(ray.trail[0].x, ray.trail[0].y);
+        for (let i = 1; i < ray.trail.length; i++) ctx.lineTo(ray.trail[i].x, ray.trail[i].y);
+        ctx.strokeStyle = ray.captured ? 'rgba(255, 150, 70, 0.55)' : 'rgba(180, 200, 255, 0.45)';
+        ctx.stroke();
+      }
+    }
+    if (layer === 'eq' || layer === 'all') {
+      for (const ray of raysEq) {
+        if (ray.trail.length < 2) continue;
+        ctx.beginPath();
+        ctx.moveTo(ray.trail[0].x, ray.trail[0].y);
+        for (let i = 1; i < ray.trail.length; i++) ctx.lineTo(ray.trail[i].x, ray.trail[i].y);
+        ctx.strokeStyle = 'rgba(120, 220, 140, 0.4)';
+        ctx.stroke();
+      }
+    }
+
+    const bhGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r_horizon * 1.4);
+    bhGrad.addColorStop(0, '#000000');
+    bhGrad.addColorStop(0.65, '#000000');
+    bhGrad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = bhGrad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r_horizon * 1.4, 0, Math.PI*2);
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(255, 200, 100, 0.5)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r_horizon, 0, Math.PI*2);
+    ctx.stroke();
+
+    // Drag preview: show the velocity vector being aimed
+    if (dragging && dragStart && dragCurrent) {
+      const dx = dragCurrent.x - dragStart.x;
+      const dy = dragCurrent.y - dragStart.y;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+
+      ctx.fillStyle = 'rgba(220, 220, 230, 0.9)';
+      ctx.beginPath();
+      ctx.arc(dragStart.x, dragStart.y, 3, 0, Math.PI*2);
+      ctx.fill();
+
+      if (dist > 4) {
+        ctx.strokeStyle = 'rgba(220, 220, 230, 0.7)';
+        ctx.lineWidth = 1.2;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.moveTo(dragStart.x, dragStart.y);
+        ctx.lineTo(dragCurrent.x, dragCurrent.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // arrowhead
+        const ang = Math.atan2(dy, dx);
+        const ah = 7;
+        ctx.fillStyle = 'rgba(220, 220, 230, 0.85)';
+        ctx.beginPath();
+        ctx.moveTo(dragCurrent.x, dragCurrent.y);
+        ctx.lineTo(dragCurrent.x - ah * Math.cos(ang - 0.4), dragCurrent.y - ah * Math.sin(ang - 0.4));
+        ctx.lineTo(dragCurrent.x - ah * Math.cos(ang + 0.4), dragCurrent.y - ah * Math.sin(ang + 0.4));
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+  }
+
+  let counter = 0;
+  function loop(t) {
+    if (!lastTime) lastTime = t;
+    const dt = Math.min(t - lastTime, 50); lastTime = t;
+    if (raysPerSec > 0 && t - lastSpawn > 1000 / raysPerSec) { autoSpawn(); lastSpawn = t; }
+    update(dt);
+    counter++;
+    if (counter % 6 === 0) computeTau();
+    render();
+    document.getElementById('stat-cap').textContent = captured;
+    requestAnimationFrame(loop);
+  }
+
+  document.getElementById('mass').addEventListener('input', e => {
+    M = parseFloat(e.target.value);
+    document.getElementById('mass-val').textContent = M;
+    updateRadii();
+  });
+  document.getElementById('rate').addEventListener('input', e => {
+    raysPerSec = parseFloat(e.target.value);
+    document.getElementById('rate-val').textContent = raysPerSec;
+  });
+
+  function setLayer(l) {
+    layer = l;
+    ['obs','eq','tau','all'].forEach(name => {
+      document.getElementById('lay-' + name).classList.toggle('active', l === name);
+    });
+    const desc = {
+      obs: 'P_obs: where light actually travels under gravity',
+      eq:  'P_eq: where light would travel without the black hole (straight lines)',
+      tau: 'τ = where observed and expected diverge. This is the true tension field.',
+      all: 'blue = observed · green = expected · red = divergence (τ)'
+    };
+    document.getElementById('layer-desc').textContent = desc[l];
+  }
+
+  document.getElementById('lay-obs').addEventListener('click', () => setLayer('obs'));
+  document.getElementById('lay-eq').addEventListener('click', () => setLayer('eq'));
+  document.getElementById('lay-tau').addEventListener('click', () => setLayer('tau'));
+  document.getElementById('lay-all').addEventListener('click', () => setLayer('all'));
+
+  document.getElementById('clear').addEventListener('click', () => {
+    raysObs = []; raysEq = []; captured = 0;
+    obsField.fill(0); eqField.fill(0); tauField.fill(0);
+    ctx.fillStyle = '#050510'; ctx.fillRect(0, 0, W, H);
+    document.getElementById('stat-peak').textContent = '—';
+  });
+
+  // --- Manual ray placement: click or click-and-drag ---
+  function getCanvasCoords(e) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (e.clientX - rect.left) * W / rect.width,
+      y: (e.clientY - rect.top) * H / rect.height
+    };
+  }
+
+  canvas.addEventListener('mousedown', e => {
+    const p = getCanvasCoords(e);
+    dragging = true;
+    dragStart = p;
+    dragCurrent = p;
+  });
+
+  canvas.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    dragCurrent = getCanvasCoords(e);
+  });
+
+  canvas.addEventListener('mouseup', e => {
+    if (!dragging || !dragStart) { dragging = false; return; }
+    dragging = false;
+    const dx = dragCurrent.x - dragStart.x;
+    const dy = dragCurrent.y - dragStart.y;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+
+    // Refuse to spawn inside event horizon
+    const distFromBH = Math.sqrt((dragStart.x - cx)**2 + (dragStart.y - cy)**2);
+    if (distFromBH < r_horizon * 1.05) {
+      dragStart = null; dragCurrent = null; return;
+    }
+
+    if (dist < 6) {
+      // tap = horizontal ray going right at default speed
+      spawnRayPair(dragStart.x, dragStart.y, 2.6, 0);
+    } else {
+      // drag = velocity vector, scaled (longer drag = faster)
+      const speed = Math.min(0.8 + dist / 35, 5);
+      const vx = (dx / dist) * speed;
+      const vy = (dy / dist) * speed;
+      spawnRayPair(dragStart.x, dragStart.y, vx, vy);
+    }
+    dragStart = null;
+    dragCurrent = null;
+  });
+
+  canvas.addEventListener('mouseleave', () => {
+    dragging = false;
+    dragStart = null;
+    dragCurrent = null;
+  });
+
+  ctx.fillStyle = '#050510'; ctx.fillRect(0, 0, W, H);
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
