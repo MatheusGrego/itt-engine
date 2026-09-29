@@ -193,6 +193,24 @@ func TestKernel_IsolatedNode(t *testing.T) {
 	}
 }
 
+func TestKernel_B1_SoleTargetGivesMaxJSD(t *testing.T) {
+	// X->Y is X's only out-edge (p = 1): tension(Y) must be the JSD maximum, 1.
+	ig := buildGraph([][3]interface{}{
+		{"X", "Y", 0.42},
+	})
+	csr := gpu.SerializeCSR(ig)
+	csc := gpu.SerializeCSC(ig, csr.NodeIdx)
+
+	tensions := gpu.ComputeAllTensions(
+		csr.RowPtr, csr.ColIdx, csr.Values,
+		csc.ColPtr, csc.RowIdx,
+		int32(csr.NumNodes),
+	)
+	if got := tensions[csr.NodeIdx["Y"]]; math.Abs(got-1) > parityEpsilon {
+		t.Errorf("tension(Y) = %.12f, want 1", got)
+	}
+}
+
 func TestKernel_OutOfRange(t *testing.T) {
 	// nodeIdx >= numNodes should return 0
 	result := gpu.ComputeNodeTension(

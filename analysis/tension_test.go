@@ -2,6 +2,7 @@ package analysis
 
 import (
 	"math"
+	"math/rand/v2"
 	"testing"
 	"time"
 
@@ -55,6 +56,8 @@ func TestTension_SingleEdge(t *testing.T) {
 	//   Divergence(JSD) of [1.0] vs [1.0] = 0.
 	// Actually, with a single out-neighbor, removing the target leaves all zeros,
 	// which Normalize converts to uniform. Both become [1.0]. JSD = 0.
+	// B1: that was the bug. Calculate now returns the divergence maximum
+	// (JSD = 1) for p = 1; see TestTension_B1_SoleTargetGivesMaxDivergence.
 	//
 	// Let's instead test tension of A in a graph A->B, A->C.
 	// Neighbors of A: B and C (via out-edges).
@@ -246,6 +249,88 @@ func TestTension_DifferentDivergenceFunctions(t *testing.T) {
 		}
 		if tension < 0 {
 			t.Fatalf("%s produced negative tension: %f", div.Name(), tension)
+		}
+	}
+}
+
+// jsdLeaveOneOut is the closed form of JSD(P, P∖v) when v holds a fraction p
+// of P's mass (T2): it depends only on p, not on how the rest is split.
+func jsdLeaveOneOut(p float64) float64 {
+	if p >= 1 {
+		return 1
+	}
+	return 0.5 * (p + (1-p)*math.Log2(2*(1-p)/(2-p)) + math.Log2(2/(2-p)))
+}
+
+func TestTension_B1_SoleTargetGivesMaxDivergence(t *testing.T) {
+	// a->v is a's only out-edge (p = 1). Removing v leaves a's perturbed
+	// distribution all zeros; the limit of the divergence as p -> 1 is its
+	// maximum, not 0.
+	ig := buildGraph([][3]interface{}{
+		{"a", "v", 5.0},
+	})
+
+	cases := []struct {
+		div  DivergenceFunc
+		want float64
+	}{
+		{JSD{}, 1.0},
+		{Hellinger{}, 1.0},
+		{KL{}, math.Log2(1 / epsilon)},
+	}
+	for _, c := range cases {
+		got := NewTensionCalculator(c.div).Calculate(ig, "v")
+		if math.Abs(got-c.want) > 1e-9 {
+			t.Errorf("%s: tension(v) = %.12f, want %.12f", c.div.Name(), got, c.want)
+		}
+	}
+}
+
+func TestTension_B1_HalfWeightMatchesClosedForm(t *testing.T) {
+	// a->v (1), a->x (1): a sends p = 0.5 of its weight to v.
+	ig := buildGraph([][3]interface{}{
+		{"a", "v", 1.0},
+		{"a", "x", 1.0},
+	})
+
+	got := NewTensionCalculator(JSD{}).Calculate(ig, "v")
+	want := 0.311278
+	if math.Abs(got-want) > 1e-5 {
+		t.Fatalf("tension(v) = %.6f, want f(0.5) = %.6f", got, want)
+	}
+	if math.Abs(jsdLeaveOneOut(0.5)-want) > 1e-5 {
+		t.Fatalf("closed form f(0.5) = %.6f, want %.6f", jsdLeaveOneOut(0.5), want)
+	}
+}
+
+func TestJSD_LeaveOneOutDependsOnlyOnP(t *testing.T) {
+	// T2: for any vector where v holds fraction p of the mass,
+	// JSD(P, P∖v) == f(p), regardless of how the remaining mass is split.
+	rng := rand.New(rand.NewPCG(1, 2))
+	for _, p := range []float64{0.05, 0.3, 0.5, 0.8, 0.99} {
+		want := jsdLeaveOneOut(p)
+		for trial := 0; trial < 20; trial++ {
+			k := 1 + rng.IntN(9) // number of other slots
+			raw := make([]float64, k+1)
+			rest := 0.0
+			for i := 1; i <= k; i++ {
+				raw[i] = 0.01 + rng.Float64()
+				rest += raw[i]
+			}
+			// Scale so that v (slot 0) holds exactly fraction p.
+			raw[0] = p / (1 - p) * rest
+			scale := 1 + 100*rng.Float64()
+			for i := range raw {
+				raw[i] *= scale
+			}
+
+			perturbed := append([]float64(nil), raw...)
+			perturbed[0] = 0
+
+			got := JSD{}.Compute(Normalize(raw), Normalize(perturbed))
+			if math.Abs(got-want) > 1e-9 {
+				t.Fatalf("p=%.2f k=%d: JSD = %.12f, want f(p) = %.12f", p, k, got, want)
+			}
 		}
 	}
 }
