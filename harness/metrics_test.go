@@ -80,3 +80,14 @@ func TestRun_Smoke(t *testing.T) {
 		}
 	}
 }
+
+func TestWilson(t *testing.T) {
+	// 14 of 200: p = 0.07, 95% Wilson interval ≈ [0.0422, 0.1140].
+	lo, hi := Wilson(14, 200)
+	if math.Abs(lo-0.0422) > 5e-4 || math.Abs(hi-0.1140) > 5e-4 {
+		t.Fatalf("Wilson(14, 200) = [%.4f, %.4f], want ≈ [0.0422, 0.1140]", lo, hi)
+	}
+	if lo, _ := Wilson(0, 100); lo != 0 {
+		t.Fatalf("Wilson(0, 100) lower = %v, want 0", lo)
+	}
+}

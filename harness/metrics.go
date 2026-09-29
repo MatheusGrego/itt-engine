@@ -149,6 +149,21 @@ func HitAtK(scores map[string]float64, nodes []string, target string, k int) flo
 	return math.Min(1, float64(slots)/float64(ties+1))
 }
 
+// Wilson returns the 95% Wilson score interval for a proportion of x
+// successes in n trials.
+func Wilson(x, n int) (lo, hi float64) {
+	if n == 0 {
+		return math.NaN(), math.NaN()
+	}
+	const z = 1.959963984540054
+	p := float64(x) / float64(n)
+	nf := float64(n)
+	den := 1 + z*z/nf
+	center := (p + z*z/(2*nf)) / den
+	half := z * math.Sqrt(p*(1-p)/nf+z*z/(4*nf*nf)) / den
+	return math.Max(0, center-half), math.Min(1, center+half)
+}
+
 // meanSD returns the mean and the sample standard deviation.
 func meanSD(xs []float64) (mean, sd float64) {
 	for _, x := range xs {

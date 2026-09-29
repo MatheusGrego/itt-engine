@@ -44,15 +44,16 @@ func Markdown(results []Result, opts Options) string {
 	b.WriteString("\nS4 é controle: o eremita não deveria subir no ranking, então AUC ≤ ~0.5 é o esperado.\n\n")
 
 	b.WriteString("### Falsos positivos sob o nulo (S0)\n\n")
-	b.WriteString("| Método | Regra de alarme | Nós em alarme (média) | FWER (réplicas com ≥ 1 alarme) |\n")
-	b.WriteString("|---|---|---|---|\n")
+	b.WriteString("| Método | Regra de alarme | Nós em alarme (média) | FWER (réplicas com ≥ 1 alarme) | IC 95% do FWER (Wilson) |\n")
+	b.WriteString("|---|---|---|---|---|\n")
 	for _, m := range methods {
 		r := byKey[[2]string{string(S0Null), m}]
 		if r.AlarmRule == "" {
-			fmt.Fprintf(&b, "| %s | n/a | n/a | n/a |\n", m)
+			fmt.Fprintf(&b, "| %s | n/a | n/a | n/a | n/a |\n", m)
 			continue
 		}
-		fmt.Fprintf(&b, "| %s | %s | %.2f%% | %.2f |\n", m, r.AlarmRule, 100*r.AlarmRate, r.FWER)
+		lo, hi := Wilson(int(math.Round(r.FWER*float64(r.Replicas))), r.Replicas)
+		fmt.Fprintf(&b, "| %s | %s | %.3f%% | %.3f | [%.3f, %.3f] |\n", m, r.AlarmRule, 100*r.AlarmRate, r.FWER, lo, hi)
 	}
 
 	b.WriteString("\n### Tempo por método (média de todos os cenários)\n\n")
