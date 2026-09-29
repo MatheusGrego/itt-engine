@@ -59,3 +59,13 @@ Formato: `Q<n> (ID do backlog, data)`.
 - **Fato:** o proxy do ambiente devolveu 403 para `data.gharchive.org`. A nova tentativa, pedida pelo Matheus, foi barrada pelo classificador de permissões antes de sair.
 - **Decidido:** pulei a Tarefa 8 inteira, como o plano manda ("registre e pule, sem inventar dados"). Não escrevi o leitor de GH Archive, porque não havia como testá-lo contra o formato real.
 - **Pergunta:** liberar `data.gharchive.org` (lista de domínios da rede e permissão do Bash) e rodar a Tarefa 8 numa próxima sessão? O resto do pipeline (Z corrigido, scan, φ̂) está pronto.
+
+## Q9 (T1/ADR-0001, fase 2b T7, 2026-09-29): modelo do relay latente
+
+- **Fato:** o plano descreve o relay em uma frase. Na leitura que implementei (`harness.GenerateRelay`):
+  - o relay é transparente no log: o fluxo n1 → v → n2 é registrado como n1 → n2;
+  - os fluxos são todos os pares (vizinho de entrada, vizinho de saída) de v no grafo base, cada um com taxa lognormal própria;
+  - uma fração ρ passa por v e some a partir de t0;
+  - v e as arestas dele não aparecem em nenhum momento.
+- **Resultado:** AUC dos vizinhos de 0.67, 0.82 e 0.90 para ρ = 0.2, 0.5 e 0.8, contra 0.52 no controle. O rastro existe, mas é diluído.
+- **Pergunta:** essa é a dependência que a tese "ausência deixa rastro" tem em mente? Outra leitura possível: v aparece nos dados antes e o fluxo n1 → n2 é redistribuído depois. Ela dá um sinal de burst, não de silêncio.
