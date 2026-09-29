@@ -1,0 +1,25 @@
+scenario,scenario_name,method,replicas,auc_mean,auc_sd,hit_at_k,alarm_rule,alarm_rate,fwer,ms_per_replica
+S0,null,tau-jsd,20,,,,τ > 0.2,0.0174,1.0000,20.4867
+S0,null,tau-jsd-cumulative,20,,,,τ > 0.2,0.0149,1.0000,22.0889
+S0,null,silence-deviance-v0,20,,,,S/2 > ln(1/α) + ln N,0.0835,1.0000,4.4867
+S0,null,burst-deviance-v0,20,,,,B/2 > ln(1/α) + ln N,0.0944,1.0000,4.6406
+S1,removal,tau-jsd,20,0.0743,0.0098,0.0000,τ > 0.2,0.0181,1.0000,22.2825
+S1,removal,tau-jsd-cumulative,20,0.4987,0.2165,0.0000,τ > 0.2,0.0150,1.0000,21.9417
+S1,removal,silence-deviance-v0,20,1.0000,0.0000,1.0000,S/2 > ln(1/α) + ln N,0.0931,1.0000,4.8224
+S1,removal,burst-deviance-v0,20,0.0262,0.0046,0.0000,B/2 > ln(1/α) + ln N,0.0940,1.0000,4.7119
+S2,thinning,tau-jsd,20,0.4075,0.1857,0.0000,τ > 0.2,0.0176,1.0000,20.9191
+S2,thinning,tau-jsd-cumulative,20,0.5261,0.2221,0.0000,τ > 0.2,0.0149,1.0000,21.3322
+S2,thinning,silence-deviance-v0,20,0.9995,0.0009,1.0000,S/2 > ln(1/α) + ln N,0.0900,1.0000,4.5547
+S2,thinning,burst-deviance-v0,20,0.0262,0.0046,0.0000,B/2 > ln(1/α) + ln N,0.0940,1.0000,4.6980
+S3,sniper,tau-jsd,20,0.0742,0.0097,0.0000,τ > 0.2,0.0174,1.0000,23.5175
+S3,sniper,tau-jsd-cumulative,20,0.0739,0.0098,0.0000,τ > 0.2,0.0149,1.0000,22.8079
+S3,sniper,silence-deviance-v0,20,0.9919,0.0236,0.9000,S/2 > ln(1/α) + ln N,0.0881,1.0000,4.9176
+S3,sniper,burst-deviance-v0,20,0.0260,0.0047,0.0000,B/2 > ln(1/α) + ln N,0.0942,1.0000,5.1010
+S4,hermit,tau-jsd,20,0.0733,0.0098,0.0000,τ > 0.2,0.0174,1.0000,22.8484
+S4,hermit,tau-jsd-cumulative,20,0.0730,0.0098,0.0000,τ > 0.2,0.0149,1.0000,23.5035
+S4,hermit,silence-deviance-v0,20,0.1872,0.2071,0.0000,S/2 > ln(1/α) + ln N,0.0835,1.0000,5.5076
+S4,hermit,burst-deviance-v0,20,0.2300,0.2061,0.0000,B/2 > ln(1/α) + ln N,0.0944,1.0000,5.0923
+S5,burst,tau-jsd,20,0.7751,0.2327,0.2000,τ > 0.2,0.0176,1.0000,22.0321
+S5,burst,tau-jsd-cumulative,20,0.6745,0.2383,0.0500,τ > 0.2,0.0149,1.0000,22.5544
+S5,burst,silence-deviance-v0,20,0.0243,0.0065,0.0000,S/2 > ln(1/α) + ln N,0.0832,1.0000,5.0805
+S5,burst,burst-deviance-v0,20,1.0000,0.0000,1.0000,B/2 > ln(1/α) + ln N,0.1053,1.0000,4.3461

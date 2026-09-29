@@ -160,6 +160,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
 
         // Build original and perturbed distributions.
+        var orig_total: f32 = 0.0;
+        var pert_total: f32 = 0.0;
         for (var i: i32 = 0; i < out_degree; i = i + 1) {
             let w = csr_values[out_start + i];
             let tgt = csr_col_idx[out_start + i];
@@ -170,6 +172,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             } else {
                 perturbed[i] = w;
             }
+            orig_total = orig_total + original[i];
+            pert_total = pert_total + perturbed[i];
+        }
+
+        // All of the neighbor's weight goes to node_idx (p = 1): the JSD limit
+        // is its maximum, 1 (B1).
+        if (pert_total == 0.0 && orig_total > 0.0) {
+            total_div = total_div + 1.0;
+            count = count + 1;
+            continue;
         }
 
         // Normalize in-place.

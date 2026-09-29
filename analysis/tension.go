@@ -57,6 +57,7 @@ func (tc *TensionCalculator) Calculate(g GraphView, nodeID string) float64 {
 		// Each slot corresponds to an out-neighbor of nID.
 		original := make([]float64, len(outNeighbors))
 		perturbedRaw := make([]float64, len(outNeighbors))
+		origTotal, pertTotal := 0.0, 0.0
 
 		for i, target := range outNeighbors {
 			w := 0.0
@@ -69,12 +70,20 @@ func (tc *TensionCalculator) Calculate(g GraphView, nodeID string) float64 {
 			} else {
 				perturbedRaw[i] = w
 			}
+			origTotal += w
+			pertTotal += perturbedRaw[i]
 		}
 
-		origDist := Normalize(original)
-		pertDist := Normalize(perturbedRaw)
-
-		div := tc.divergence.Compute(origDist, pertDist)
+		var div float64
+		if pertTotal == 0 && origTotal > 0 {
+			// All of nID's outgoing weight goes to nodeID (p = 1). The perturbed
+			// distribution is 0/0; Normalize would return uniform, which equals
+			// the original when nID has a single target and yields 0. The limit
+			// of the divergence as p -> 1 is its maximum (B1).
+			div = maxDivergence(tc.divergence)
+		} else {
+			div = tc.divergence.Compute(Normalize(original), Normalize(perturbedRaw))
+		}
 		totalDiv += div
 		count++
 	}

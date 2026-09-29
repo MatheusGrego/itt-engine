@@ -73,6 +73,7 @@ func ComputeNodeTensionF32(
 		}
 
 		// Build original and perturbed distributions.
+		var origTotal, pertTotal float32
 		for i := int32(0); i < outDegree; i++ {
 			w := csrValues[outStart+i]
 			target := csrColIdx[outStart+i]
@@ -83,6 +84,16 @@ func ComputeNodeTensionF32(
 			} else {
 				perturbed[i] = w
 			}
+			origTotal += w
+			pertTotal += perturbed[i]
+		}
+
+		// All of the neighbor's weight goes to nodeIdx (p = 1): the JSD limit
+		// is its maximum, 1 (B1).
+		if pertTotal == 0 && origTotal > 0 {
+			totalDiv += 1
+			count++
+			continue
 		}
 
 		// Normalize in-place.
