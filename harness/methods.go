@@ -31,7 +31,7 @@ const TauThreshold = 0.2
 
 // DefaultMethods returns M1 to M4 in report order.
 func DefaultMethods() []Method {
-	return []Method{TauJSD{}, TauJSD{Cumulative: true}, SilenceDeviance{}, BurstDeviance{}}
+	return []Method{TauJSD{}, SilenceDeviance{}, BurstDeviance{}, SilenceZ{}, BurstZ{}}
 }
 
 // TauJSD is the current engine tension: leave-one-out JSD (with B1) on a graph
