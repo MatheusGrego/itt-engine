@@ -24,3 +24,10 @@ Formato: `Q<n> (ID do backlog, data)`.
 - **Decidido:** reescrevi o exemplo mesmo assim. O plano só pedia reescrita se ele não detectasse nada, mas o exemplo antigo sugeria que a engine pega o charlie, o que é falso. O novo cenário sinaliza `service:legacy` (τ = 0.7744) porque dois usuários dependem dele, que é o que o τ mede hoje. O exemplo roda como `ExampleEngine_readme` (`example_test.go`) com a saída conferida.
 - **Também:** as seções novas do README estão em inglês, porque o README inteiro é em inglês (a regra de PT-BR vale para docs novos). A tabela de divergências dizia JSD em [0, ln2]; o código usa log2, então corrigi para [0, 1].
 - **Pergunta:** nenhuma bloqueante. Se preferir o README em PT-BR, é só trocar.
+
+## Q4 (E1/ADR-0002, 2026-09-29): arestas que só aparecem depois de t0
+
+- **Fato:** no M3/M4 do harness, uma aresta sem nenhum evento em [0, t0) tem `e = 0`. O plano manda aplicar o floor de 0.5 só em arestas que existiam antes, então para `o > 0` o desvio fica `o·ln(o/0)` = infinito.
+- **Decidido:** essas arestas ficam fora de S e de B (`harness.Deviance`). Isso não mexe no S (com `e = 0` não existe `o < e`), só no B: aresta nova não conta como burst.
+- **Por quê:** é a leitura literal do plano sem produzir infinito. Um B infinito empataria no topo todo nó que ganhou uma aresta por acaso (com λ ≈ 0.3, uma aresta real fica 8 janelas zerada com chance de ~9%).
+- **Pergunta:** aresta nova deveria contar como burst (ex.: `e` = floor de 0.5 também para ela, ou um prior por nó)? Isso é decisão da ADR-0003 (modelo nulo).
