@@ -28,6 +28,7 @@ var experiments = map[string]struct {
 	run   func(harness.Options) (string, []harness.CondResult)
 }{
 	"discreteness": {"Tarefa 2: discretude do M5/M6", harness.Discreteness},
+	"stress":       {"Tarefa 3: geradores anti-viés (stress)", harness.Stress},
 }
 
 func main() {
@@ -38,6 +39,12 @@ func main() {
 	flag.IntVar(&opts.Replicas, "r", opts.Replicas, "replicas per scenario (seeds 1..r)")
 	flag.Float64Var(&opts.Alpha, "alpha", opts.Alpha, "significance level for the evidence alarm rule")
 	flag.IntVar(&opts.TopK, "k", opts.TopK, "k for hit@k")
+	flag.Float64Var(&opts.Config.RateMu, "ratemu", opts.Config.RateMu, "mu of the lognormal edge rate (ln 0.5 = low-count regime)")
+	flag.Float64Var(&opts.Config.Dispersion, "dispersion", 0, "gamma shape k of gamma-Poisson counts (0 = Poisson)")
+	flag.Float64Var(&opts.Config.Trend, "trend", 0, "global rate multiplier (1+trend)^t per window")
+	flag.Float64Var(&opts.Config.Seasonality, "season", 0, "amplitude A of the rate multiplier 1 + A sin(2πt/P)")
+	flag.IntVar(&opts.Config.SeasonPeriod, "season-period", 4, "period P of the seasonality, in windows")
+	flag.Float64Var(&opts.Config.Drift, "drift", 0, "per-edge random walk sd of the log rate, per window (extra)")
 	out := flag.String("out", "docs/refinement/results", "directory for the .csv and .md outputs (empty to skip)")
 	name := flag.String("name", "", "base name of the output files (default results, or fase2b-<exp> with -exp)")
 	exp := flag.String("exp", "", "fase 2b experiment to run instead of the default table: "+expNames())

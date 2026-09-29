@@ -17,8 +17,12 @@ func Markdown(results []Result, opts Options) string {
 	var b strings.Builder
 
 	cfg := opts.Config
-	fmt.Fprintf(&b, "Parâmetros: N = %d, T = %d, t0 = %d, R = %d réplicas (sementes 1..%d), α = %g, k = %d.\n\n",
+	fmt.Fprintf(&b, "Parâmetros: N = %d, T = %d, t0 = %d, R = %d réplicas (sementes 1..%d), α = %g, k = %d.",
 		cfg.N, cfg.T, cfg.T0, opts.Replicas, opts.Replicas, opts.Alpha, opts.TopK)
+	if s := cfg.stressString(); s != "" {
+		fmt.Fprintf(&b, " Stress: %s.", s)
+	}
+	b.WriteString("\n\n")
 
 	fmt.Fprintf(&b, "### Ranking do alvo (AUC média ± desvio / hit@%d)\n\n", opts.TopK)
 	b.WriteString("| Cenário |")

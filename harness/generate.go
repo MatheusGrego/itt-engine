@@ -56,6 +56,41 @@ type Config struct {
 	FitnessSigma float64 // sigma of the lognormal destination fitness
 	RateMu       float64 // mu of the lognormal edge rate
 	RateSigma    float64 // sigma of the lognormal edge rate
+
+	// Stress options (fase 2b, Tarefa 3). Their zero values keep the pure
+	// Poisson generator with constant rates, bit for bit.
+
+	// Dispersion is the gamma shape k of a gamma-Poisson (negative binomial)
+	// count: each window draws its rate from Gamma(k, λ/k), so the variance
+	// is λ + λ²/k. 0 means Poisson.
+	Dispersion float64
+	// Trend multiplies every rate in window t by (1 + Trend)^t.
+	Trend float64
+	// Seasonality is the amplitude A of a rate multiplier
+	// 1 + A sin(2πt/P), with P = SeasonPeriod (4 when 0).
+	Seasonality  float64
+	SeasonPeriod int
+	// Drift (extra, not in the plan) gives each edge its own random walk on
+	// the log rate, with a N(0, Drift²) step per window: heterogeneous,
+	// per-edge non-stationarity that no global correction can absorb.
+	Drift float64
+}
+
+// windowMult is the global rate multiplier of window t (Trend and
+// Seasonality); exactly 1 when both are zero.
+func (c Config) windowMult(t int) float64 {
+	m := 1.0
+	if c.Trend != 0 {
+		m *= math.Pow(1+c.Trend, float64(t))
+	}
+	if c.Seasonality != 0 {
+		p := c.SeasonPeriod
+		if p == 0 {
+			p = 4
+		}
+		m *= 1 + c.Seasonality*math.Sin(2*math.Pi*float64(t)/float64(p))
+	}
+	return m
 }
 
 // DefaultConfig returns the parameters from the 2026-09-29 plan.
@@ -184,10 +219,20 @@ func Generate(s Scenario, cfg Config, seed uint64) Dataset {
 		d.Rates[key] = e.rate
 		incident := e.from == target || e.to == target
 		erng := rand.New(rand.NewPCG(seed, streamCounts+uint64(k)))
+		logDrift := 0.0
 		for t := 0; t < cfg.T; t++ {
-			lambda := e.rate
+			lambda := e.rate * cfg.windowMult(t)
+			if cfg.Drift > 0 {
+				if t > 0 {
+					logDrift += cfg.Drift * erng.NormFloat64()
+				}
+				lambda *= math.Exp(logDrift)
+			}
 			if incident && t >= cfg.T0 {
 				lambda *= afterMult
+			}
+			if cfg.Dispersion > 0 && lambda > 0 {
+				lambda *= gammaRand(erng, cfg.Dispersion) / cfg.Dispersion
 			}
 			if c := poisson(erng, lambda); c > 0 {
 				d.Counts[t][key] = c
@@ -276,6 +321,35 @@ func poisson(rng *rand.Rand, lambda float64) int {
 		lambda -= 30
 	}
 	return k + poissonKnuth(rng, lambda)
+}
+
+// gammaRand draws from Gamma(shape, 1) with the Marsaglia-Tsang method;
+// shapes below 1 use the boost Gamma(k) = Gamma(k+1)·U^(1/k).
+func gammaRand(rng *rand.Rand, shape float64) float64 {
+	if shape < 1 {
+		u := rng.Float64()
+		return gammaRand(rng, shape+1) * math.Pow(u, 1/shape)
+	}
+	d := shape - 1.0/3
+	c := 1 / math.Sqrt(9*d)
+	for {
+		var x, v float64
+		for {
+			x = rng.NormFloat64()
+			v = 1 + c*x
+			if v > 0 {
+				break
+			}
+		}
+		v = v * v * v
+		u := rng.Float64()
+		if u < 1-0.0331*x*x*x*x {
+			return d * v
+		}
+		if math.Log(u) < 0.5*x*x+d*(1-v+math.Log(v)) {
+			return d * v
+		}
+	}
 }
 
 func poissonKnuth(rng *rand.Rand, lambda float64) int {
