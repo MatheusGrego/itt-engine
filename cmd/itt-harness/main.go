@@ -12,6 +12,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/csv"
 	"flag"
 	"fmt"
 	"os"
@@ -22,14 +23,24 @@ import (
 	"github.com/MatheusGrego/itt-engine/harness"
 )
 
-// experiments maps -exp values to their runners and titles.
+// experiments maps -exp values to their runners and titles. A runner
+// returns the markdown body and the CSV rows (header first).
 var experiments = map[string]struct {
 	title string
-	run   func(harness.Options) (string, []harness.CondResult)
+	run   func(harness.Options) (string, [][]string)
 }{
-	"discreteness": {"Tarefa 2: discretude do M5/M6", harness.Discreteness},
-	"stress":       {"Tarefa 3: geradores anti-viés (stress)", harness.Stress},
-	"corrections":  {"Tarefa 4: correções do M5/M6 (q̂ global, φ̂)", harness.Corrections},
+	"discreteness": {"Tarefa 2: discretude do M5/M6", cond(harness.Discreteness)},
+	"stress":       {"Tarefa 3: geradores anti-viés (stress)", cond(harness.Stress)},
+	"corrections":  {"Tarefa 4: correções do M5/M6 (q̂ global, φ̂)", cond(harness.Corrections)},
+	"power":        {"Tarefa 5: curva de poder do M5 (limite de detecção empírico)", harness.Power},
+}
+
+// cond adapts a runner that returns CondResults.
+func cond(f func(harness.Options) (string, []harness.CondResult)) func(harness.Options) (string, [][]string) {
+	return func(o harness.Options) (string, [][]string) {
+		md, res := f(o)
+		return md, harness.CondRows(res)
+	}
 }
 
 func main() {
@@ -78,8 +89,9 @@ func main() {
 			*name = "fase2b-" + *exp
 		}
 		opts.Workers = harness.ExperimentOptions(opts.Replicas).Workers
-		body, results := e.run(opts)
-		err = harness.WriteCondCSV(&csvBuf, results)
+		body, rows := e.run(opts)
+		w := csv.NewWriter(&csvBuf)
+		err = w.WriteAll(rows)
 		md = "# " + e.title + "\n\n" + generatedBy() + body
 	}
 	if err != nil {

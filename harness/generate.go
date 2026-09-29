@@ -21,6 +21,10 @@ const (
 	S3Sniper   Scenario = "S3" // planted low-degree node linked to hubs, then silent
 	S4Hermit   Scenario = "S4" // no change; target is the lowest-degree node (control)
 	S5Burst    Scenario = "S5" // all target edges rise to 300%
+
+	// S2xParam is the parametric thinning of Tarefa 5: the target's edges
+	// drop to Config.ThinMult. Not in Scenarios; used by the power sweep.
+	S2xParam Scenario = "S2x"
 )
 
 // Scenarios lists every scenario in report order.
@@ -41,6 +45,8 @@ func (s Scenario) Name() string {
 		return "hermit"
 	case S5Burst:
 		return "burst"
+	case S2xParam:
+		return "thinning-x"
 	}
 	return string(s)
 }
@@ -74,6 +80,19 @@ type Config struct {
 	// the log rate, with a N(0, Drift²) step per window: heterogeneous,
 	// per-edge non-stationarity that no global correction can absorb.
 	Drift float64
+
+	// Power-curve options (fase 2b, Tarefa 5).
+
+	// ThinMult is the after-multiplier of the S2x target's edges.
+	ThinMult float64
+	// TargetLo and TargetHi bound, as fractions of the degree ranking, the
+	// band the S1/S2/S5/S2x target is drawn from; both 0 means the middle
+	// band 45%-55%.
+	TargetLo, TargetHi float64
+	// PartialFrac (extra, not in the plan), when in (0, 1), alters only
+	// that fraction of the target's edges (rounded, at least one); the
+	// rest keep their rate. 0 alters them all.
+	PartialFrac float64
 }
 
 // windowMult is the global rate multiplier of window t (Trend and
@@ -115,6 +134,7 @@ type Dataset struct {
 	Target   string                // "" in S0
 	Counts   []map[[2]string]int   // Counts[t][{from,to}]; only counts > 0 are stored
 	Rates    map[[2]string]float64 // ground-truth base rates; methods must not read it
+	Altered  [][2]string           // target edges changed after T0 (ground truth, like Rates)
 }
 
 // RNG streams: the base graph and its rates depend only on the seed, so every
@@ -169,8 +189,8 @@ func Generate(s Scenario, cfg Config, seed uint64) Dataset {
 	target := -1
 	numNodes := n
 	switch s {
-	case S1Removal, S2Thinning, S5Burst:
-		target = nearMedianDegree(trng, edges, n)
+	case S1Removal, S2Thinning, S5Burst, S2xParam:
+		target = bandDegree(trng, edges, n, cfg.TargetLo, cfg.TargetHi)
 	case S4Hermit:
 		target = lowestDegree(trng, edges, n)
 	case S3Sniper:
@@ -191,6 +211,8 @@ func Generate(s Scenario, cfg Config, seed uint64) Dataset {
 		afterMult = 0.3
 	case S5Burst:
 		afterMult = 3
+	case S2xParam:
+		afterMult = cfg.ThinMult
 	default:
 		afterMult = 1
 	}
@@ -214,10 +236,29 @@ func Generate(s Scenario, cfg Config, seed uint64) Dataset {
 		d.Counts[t] = make(map[[2]string]int)
 	}
 
+	// With PartialFrac, only a random subset of the target's edges changes.
+	var spared map[int]bool
+	if target >= 0 && cfg.PartialFrac > 0 && cfg.PartialFrac < 1 {
+		var inc []int
+		for k, e := range edges {
+			if e.from == target || e.to == target {
+				inc = append(inc, k)
+			}
+		}
+		keep := max(1, int(math.Round(cfg.PartialFrac*float64(len(inc)))))
+		spared = map[int]bool{}
+		for _, i := range trng.Perm(len(inc))[keep:] {
+			spared[inc[i]] = true
+		}
+	}
+
 	for k, e := range edges {
 		key := [2]string{nodeID(e.from), nodeID(e.to)}
 		d.Rates[key] = e.rate
-		incident := e.from == target || e.to == target
+		incident := (e.from == target || e.to == target) && !spared[k]
+		if incident && afterMult != 1 {
+			d.Altered = append(d.Altered, key)
+		}
 		erng := rand.New(rand.NewPCG(seed, streamCounts+uint64(k)))
 		logDrift := 0.0
 		for t := 0; t < cfg.T; t++ {
@@ -265,6 +306,25 @@ func totalDegrees(edges []edge, n int) []int {
 		deg[e.to]++
 	}
 	return deg
+}
+
+// bandDegree picks, at random, one node whose total degree ranks in
+// [lo, hi) as fractions of all nodes; lo = hi = 0 is the middle 10%.
+func bandDegree(rng *rand.Rand, edges []edge, n int, lo, hi float64) int {
+	if lo == 0 && hi == 0 {
+		return nearMedianDegree(rng, edges, n)
+	}
+	deg := totalDegrees(edges, n)
+	idx := make([]int, n)
+	for i := range idx {
+		idx[i] = i
+	}
+	sort.SliceStable(idx, func(a, b int) bool { return deg[idx[a]] < deg[idx[b]] })
+	l, h := int(lo*float64(n)), int(hi*float64(n))
+	if h <= l {
+		h = l + 1
+	}
+	return idx[l+rng.IntN(h-l)]
 }
 
 // nearMedianDegree picks, at random, one node whose total degree ranks in

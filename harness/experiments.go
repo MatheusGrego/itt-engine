@@ -1,9 +1,7 @@
 package harness
 
 import (
-	"encoding/csv"
 	"fmt"
-	"io"
 	"math"
 	"runtime"
 	"strconv"
@@ -119,29 +117,21 @@ func MethodTables(results []CondResult, scenarios []Scenario) string {
 	return b.String()
 }
 
-// WriteCondCSV writes one row per (condition, scenario, method); NaN fields
-// are left empty.
-func WriteCondCSV(w io.Writer, results []CondResult) error {
-	cw := csv.NewWriter(w)
-	header := []string{"condition", "scenario", "method", "replicas", "auc_mean", "auc_sd", "hit_at_k",
-		"alarm_rule", "alarm_rate", "fwer", "fwer_count", "fwer_lo", "fwer_hi", "power"}
-	if err := cw.Write(header); err != nil {
-		return err
-	}
+// CondRows returns the CSV rows (header first) of results, one per
+// (condition, scenario, method); NaN fields are left empty.
+func CondRows(results []CondResult) [][]string {
+	rows := [][]string{{"condition", "scenario", "method", "replicas", "auc_mean", "auc_sd", "hit_at_k",
+		"alarm_rule", "alarm_rate", "fwer", "fwer_count", "fwer_lo", "fwer_hi", "power"}}
 	for _, r := range results {
 		lo, hi := r.FWERInterval()
 		if math.IsNaN(r.FWER) {
 			lo, hi = math.NaN(), math.NaN()
 		}
-		row := []string{r.Condition, string(r.Scenario), r.Method, strconv.Itoa(r.Replicas),
+		rows = append(rows, []string{r.Condition, string(r.Scenario), r.Method, strconv.Itoa(r.Replicas),
 			num(r.AUCMean), num(r.AUCSD), num(r.HitAtK), r.AlarmRule, num(r.AlarmRate),
-			num(r.FWER), strconv.Itoa(r.FWERCount), num(lo), num(hi), num(r.Power)}
-		if err := cw.Write(row); err != nil {
-			return err
-		}
+			num(r.FWER), strconv.Itoa(r.FWERCount), num(lo), num(hi), num(r.Power)})
 	}
-	cw.Flush()
-	return cw.Error()
+	return rows
 }
 
 // DiscretenessVariants are the three per-edge treatments of Tarefa 2.
