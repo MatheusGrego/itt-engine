@@ -32,6 +32,7 @@ var experiments = map[string]struct {
 	"discreteness": {"Tarefa 2: discretude do M5/M6", cond(harness.Discreteness)},
 	"stress":       {"Tarefa 3: geradores anti-viés (stress)", cond(harness.Stress)},
 	"corrections":  {"Tarefa 4: correções do M5/M6 (q̂ global, φ̂)", cond(harness.Corrections)},
+	"scan":         {"Tarefa 6: t0 desconhecido (modo scan)", cond(harness.Scan)},
 	"power":        {"Tarefa 5: curva de poder do M5 (limite de detecção empírico)", harness.Power},
 }
 

@@ -93,6 +93,11 @@ type Config struct {
 	// that fraction of the target's edges (rounded, at least one); the
 	// rest keep their rate. 0 alters them all.
 	PartialFrac float64
+
+	// T0Random (Tarefa 6) draws the real t0 uniformly in [T − 4, T − 1]
+	// (clipped to ≥ 1) per replica, from its own stream; Dataset.T0 holds
+	// it, and a method that must not know it ignores Dataset.T0.
+	T0Random bool
 }
 
 // windowMult is the global rate multiplier of window t (Trend and
@@ -143,6 +148,7 @@ type Dataset struct {
 const (
 	streamGraph  uint64 = 1
 	streamTarget uint64 = 2
+	streamT0     uint64 = 3
 	streamCounts uint64 = 1 << 32
 )
 
@@ -203,6 +209,12 @@ func Generate(s Scenario, cfg Config, seed uint64) Dataset {
 		}
 	}
 
+	t0 := cfg.T0
+	if cfg.T0Random {
+		lo := max(1, cfg.T-4)
+		t0 = lo + rand.New(rand.NewPCG(seed, streamT0)).IntN(cfg.T-lo)
+	}
+
 	var afterMult float64
 	switch s {
 	case S1Removal, S3Sniper:
@@ -221,7 +233,7 @@ func Generate(s Scenario, cfg Config, seed uint64) Dataset {
 		Scenario: s,
 		N:        numNodes,
 		T:        cfg.T,
-		T0:       cfg.T0,
+		T0:       t0,
 		Nodes:    make([]string, numNodes),
 		Counts:   make([]map[[2]string]int, cfg.T),
 		Rates:    make(map[[2]string]float64, len(edges)),
@@ -269,7 +281,7 @@ func Generate(s Scenario, cfg Config, seed uint64) Dataset {
 				}
 				lambda *= math.Exp(logDrift)
 			}
-			if incident && t >= cfg.T0 {
+			if incident && t >= t0 {
 				lambda *= afterMult
 			}
 			if cfg.Dispersion > 0 && lambda > 0 {
