@@ -61,7 +61,22 @@ type ZConfig struct {
 	// MinN leaves out, from the sum and from k_v, the edges whose total
 	// n = a + o is below MinN (0 or 1 keeps every observed edge).
 	MinN int
+	// GlobalQ replaces the fixed q = (T − split)/T by the graph-wide
+	// q̂ = total after / total (Tarefa 4), which absorbs a global trend.
+	GlobalQ bool
+	// Phi divides every r by sqrt(φ̂), an overdispersion factor estimated
+	// from the before windows only (Tarefa 4).
+	Phi PhiMode
 }
+
+// PhiMode selects the overdispersion correction of ZConfig.
+type PhiMode int
+
+const (
+	PhiNone   PhiMode = iota
+	PhiMedian         // one φ̂ for the graph: median Pearson dispersion
+	PhiBands          // one φ̂ per band of before-rate (log2 bins)
+)
 
 // DefaultZConfig is the M5/M6 default chosen in Tarefa 2 of fase 2b: the
 // exact mid-p. The signed root (zero value) and the n_min filter stay as
@@ -78,6 +93,15 @@ func (c ZConfig) Suffix() string {
 	if c.MinN > 1 {
 		s += fmt.Sprintf("-nmin%d", c.MinN)
 	}
+	if c.GlobalQ {
+		s += "-qhat"
+	}
+	switch c.Phi {
+	case PhiMedian:
+		s += "-phi"
+	case PhiBands:
+		s += "-phibands"
+	}
 	return s
 }
 
@@ -89,6 +113,15 @@ func (c ZConfig) Describe() string {
 	}
 	if c.MinN > 1 {
 		s += fmt.Sprintf(", arestas com n < %d fora", c.MinN)
+	}
+	if c.GlobalQ {
+		s += ", q̂ global"
+	}
+	switch c.Phi {
+	case PhiMedian:
+		s += ", φ̂ mediana"
+	case PhiBands:
+		s += ", φ̂ por faixa de taxa"
 	}
 	return s
 }
@@ -120,6 +153,13 @@ func EdgeZ(d Dataset, split int, cfg ZConfig) map[string]float64 {
 	before := sumCounts(d, 0, split)
 	after := sumCounts(d, split, d.T)
 	q := float64(d.T-split) / float64(d.T)
+	if cfg.GlobalQ {
+		q = globalQ(before, after, q)
+	}
+	phi := func([2]string) float64 { return 1 }
+	if cfg.Phi != PhiNone {
+		phi = estimatePhi(d, split, cfg.Phi)
+	}
 
 	sum := make(map[string]float64, len(d.Nodes))
 	cnt := make(map[string]int, len(d.Nodes))
@@ -129,6 +169,9 @@ func EdgeZ(d Dataset, split int, cfg ZConfig) map[string]float64 {
 			continue
 		}
 		r := cfg.edge(float64(a), float64(o), q)
+		if p := phi(key); p != 1 {
+			r /= math.Sqrt(p)
+		}
 		for _, v := range key {
 			sum[v] += r
 			cnt[v]++

@@ -47,3 +47,9 @@ Formato: `Q<n> (ID do backlog, data)`.
 - **Decidido:** o default do M5/M6 no harness passa a ser o **mid-p exato**, a opção conservadora e a única com FWER ≤ α nas duas condições. O signed root e o n_min = 3 continuam como opções (`ZConfig`).
 - **Custo conhecido:** com pouca contagem o mid-p é sub-disperso (var Z = 0.81), então perde poder (S1 0.49 contra 0.90).
 - **Pergunta:** vale padronizar cada aresta pela média e pelo desvio exatos do mid-p sob H0 dado n? Dá para calcular pela binomial, e isso devolve var 1 sem viés. Não testei, porque muda a estatística e não estava no plano.
+
+## Q7 (ADR-0002/0004, fase 2b T4, 2026-09-29): correções do M5/M6
+
+- **Fato:** o q̂ global conserta tendência e sazonalidade globais. O φ̂ por faixa de taxa conserta a sobredispersão só no silêncio: o burst com k = 1 fica com FWER 0.77. Nenhuma correção conserta o drift por aresta (σ = 0.15: FWER 0.99 no silêncio). Números em `docs/refinement/results/fase2b-corrections.md`.
+- **Decidido:** as correções entram como opções (`ZConfig.GlobalQ`, `ZConfig.Phi`), e a combinação q̂ + φ̂ por faixa virou `CorrectedZConfig()`, usada nas Tarefas 5, 6 e 8. O default (`DefaultZConfig`, mid-p puro) não mudou. Também não implementei o q̂ por tipo de nó: o gerador não tem tipos.
+- **Pergunta:** para o burst sob sobredispersão e para o drift, o próximo passo seria trocar o Poisson por um modelo com dispersão explícita (beta-binomial condicional, estimado nas janelas antes), ou um nulo empírico por permutação de janelas. As duas mudam a estatística e ficam para a ADR-0003/0004.

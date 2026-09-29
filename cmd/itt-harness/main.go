@@ -29,6 +29,7 @@ var experiments = map[string]struct {
 }{
 	"discreteness": {"Tarefa 2: discretude do M5/M6", harness.Discreteness},
 	"stress":       {"Tarefa 3: geradores anti-viés (stress)", harness.Stress},
+	"corrections":  {"Tarefa 4: correções do M5/M6 (q̂ global, φ̂)", harness.Corrections},
 }
 
 func main() {
