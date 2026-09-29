@@ -40,3 +40,10 @@ Formato: `Q<n> (ID do backlog, data)`.
   1. comparar S(v) com o quantil de χ² com k = número de arestas do nó (lidando com o fato de S só somar o lado o < e);
   2. inflar o esperado pelo ruído do baseline (fator 1 + (T − t0)/t0) ou usar um teste de razão entre dois Poisson (antes contra depois) em vez de tratar `e` como conhecido;
   3. nulo empírico: calibrar o limiar por grau no próprio S0 ou por permutação de janelas.
+
+## Q6 (ADR-0002/0004, fase 2b T2, 2026-09-29): variante por aresta do M5/M6
+
+- **Fato:** a regra do plano (FWER mais perto de α no S0 default, menor perda de AUC) empatou entre o signed root e o mid-p. A distância média ao α foi 0.0125 nas duas, com IC de ±0.03 em R = 200, e a perda de AUC foi ≈ 0. A calibração por nó (10⁵ amostras) mostrou que o signed root tem viés negativo que cresce com o grau (b·√k no Stouffer), e em pouca contagem o FWER de silêncio dele é 0.130. Os números estão em `docs/refinement/results/fase2b-discreteness.md`.
+- **Decidido:** o default do M5/M6 no harness passa a ser o **mid-p exato**, a opção conservadora e a única com FWER ≤ α nas duas condições. O signed root e o n_min = 3 continuam como opções (`ZConfig`).
+- **Custo conhecido:** com pouca contagem o mid-p é sub-disperso (var Z = 0.81), então perde poder (S1 0.49 contra 0.90).
+- **Pergunta:** vale padronizar cada aresta pela média e pelo desvio exatos do mid-p sob H0 dado n? Dá para calcular pela binomial, e isso devolve var 1 sem viés. Não testei, porque muda a estatística e não estava no plano.

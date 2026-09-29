@@ -29,9 +29,12 @@ type Alarmer interface {
 // TauThreshold is the engine's default static threshold (itt.NewBuilder).
 const TauThreshold = 0.2
 
-// DefaultMethods returns M1 to M6 in report order (M5/M6: silence/burst Z, prototype from the review of PR #2).
+// DefaultMethods returns M1 to M6 in report order. M5/M6 are the silence and
+// burst Z with DefaultZConfig (the prototype from the review of PR #2 used
+// the signed root, ZConfig{}).
 func DefaultMethods() []Method {
-	return []Method{TauJSD{}, TauJSD{Cumulative: true}, SilenceDeviance{}, BurstDeviance{}, SilenceZ{}, BurstZ{}}
+	z := DefaultZConfig()
+	return []Method{TauJSD{}, TauJSD{Cumulative: true}, SilenceDeviance{}, BurstDeviance{}, SilenceZ{Cfg: z}, BurstZ{Cfg: z}}
 }
 
 // TauJSD is the current engine tension: leave-one-out JSD (with B1) on a graph

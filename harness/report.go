@@ -52,7 +52,7 @@ func Markdown(results []Result, opts Options) string {
 			fmt.Fprintf(&b, "| %s | n/a | n/a | n/a | n/a |\n", m)
 			continue
 		}
-		lo, hi := Wilson(int(math.Round(r.FWER*float64(r.Replicas))), r.Replicas)
+		lo, hi := r.FWERInterval()
 		fmt.Fprintf(&b, "| %s | %s | %.3f%% | %.3f | [%.3f, %.3f] |\n", m, r.AlarmRule, 100*r.AlarmRate, r.FWER, lo, hi)
 	}
 
