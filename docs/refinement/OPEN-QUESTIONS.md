@@ -53,3 +53,9 @@ Formato: `Q<n> (ID do backlog, data)`.
 - **Fato:** o q̂ global conserta tendência e sazonalidade globais. O φ̂ por faixa de taxa conserta a sobredispersão só no silêncio: o burst com k = 1 fica com FWER 0.77. Nenhuma correção conserta o drift por aresta (σ = 0.15: FWER 0.99 no silêncio). Números em `docs/refinement/results/fase2b-corrections.md`.
 - **Decidido:** as correções entram como opções (`ZConfig.GlobalQ`, `ZConfig.Phi`), e a combinação q̂ + φ̂ por faixa virou `CorrectedZConfig()`, usada nas Tarefas 5, 6 e 8. O default (`DefaultZConfig`, mid-p puro) não mudou. Também não implementei o q̂ por tipo de nó: o gerador não tem tipos.
 - **Pergunta:** para o burst sob sobredispersão e para o drift, o próximo passo seria trocar o Poisson por um modelo com dispersão explícita (beta-binomial condicional, estimado nas janelas antes), ou um nulo empírico por permutação de janelas. As duas mudam a estatística e ficam para a ADR-0003/0004.
+
+## Q8 (X4, fase 2b T8, 2026-09-29): caso faker bloqueado pela rede
+
+- **Fato:** o proxy do ambiente devolveu 403 para `data.gharchive.org`. A nova tentativa, pedida pelo Matheus, foi barrada pelo classificador de permissões antes de sair.
+- **Decidido:** pulei a Tarefa 8 inteira, como o plano manda ("registre e pule, sem inventar dados"). Não escrevi o leitor de GH Archive, porque não havia como testá-lo contra o formato real.
+- **Pergunta:** liberar `data.gharchive.org` (lista de domínios da rede e permissão do Bash) e rodar a Tarefa 8 numa próxima sessão? O resto do pipeline (Z corrigido, scan, φ̂) está pronto.
