@@ -61,6 +61,7 @@ func ComputeNodeTension(
 		// Build original and perturbed distributions.
 		original := make([]float64, outDegree)
 		perturbed := make([]float64, outDegree)
+		origTotal, pertTotal := 0.0, 0.0
 
 		for i := 0; i < outDegree; i++ {
 			w := csrValues[outStart+int32(i)]
@@ -72,12 +73,18 @@ func ComputeNodeTension(
 			} else {
 				perturbed[i] = w
 			}
+			origTotal += w
+			pertTotal += perturbed[i]
 		}
 
-		origDist := normalize(original)
-		pertDist := normalize(perturbed)
-
-		div := jsd(origDist, pertDist)
+		var div float64
+		if pertTotal == 0 && origTotal > 0 {
+			// All of the neighbor's weight goes to nodeIdx (p = 1): the JSD
+			// limit is its maximum, 1 (B1). Matches analysis.TensionCalculator.
+			div = 1
+		} else {
+			div = jsd(normalize(original), normalize(perturbed))
+		}
 		totalDiv += div
 		count++
 	}

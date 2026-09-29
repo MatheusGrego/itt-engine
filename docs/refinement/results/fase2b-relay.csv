@@ -1,0 +1,9 @@
+rho,drop,method,replicas,auc_mean,auc_sd,neighbour_alarm_frac,other_alarm_frac,fwer_others,neighbours,flows,neighbour_degree
+0.2000,true,silence-z-2pois-midp,100,0.6721,0.1145,0.0043,0.0001,0.0300,6.7900,9.4500,19.4816
+0.2000,true,silence-z-2pois-midp-qhat-phibands,100,0.6712,0.1145,0.0043,0.0001,0.0300,6.7900,9.4500,19.4816
+0.5000,true,silence-z-2pois-midp,100,0.8212,0.1184,0.0514,0.0001,0.0300,6.7900,9.4500,19.4788
+0.5000,true,silence-z-2pois-midp-qhat-phibands,100,0.8194,0.1191,0.0515,0.0001,0.0300,6.7900,9.4500,19.4788
+0.8000,true,silence-z-2pois-midp,100,0.9014,0.1184,0.2711,0.0001,0.0300,6.7900,9.4500,19.4816
+0.8000,true,silence-z-2pois-midp-qhat-phibands,100,0.8997,0.1188,0.2656,0.0001,0.0300,6.7900,9.4500,19.4816
+0.5000,false,silence-z-2pois-midp,100,0.5157,0.1211,0.0000,0.0001,0.0300,6.7900,9.4500,19.4816
+0.5000,false,silence-z-2pois-midp-qhat-phibands,100,0.5161,0.1215,0.0000,0.0001,0.0300,6.7900,9.4500,19.4816

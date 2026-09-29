@@ -20,6 +20,7 @@ type JSD struct{}
 
 func (JSD) Name() string      { return "jsd" }
 func (JSD) IsBounded() bool   { return true }
+func (JSD) MaxValue() float64 { return 1 }
 
 func (JSD) Compute(p, q []float64) float64 {
 	m := make([]float64, len(p))
@@ -32,8 +33,13 @@ func (JSD) Compute(p, q []float64) float64 {
 // KL implements Kullback-Leibler Divergence. Asymmetric, unbounded.
 type KL struct{}
 
-func (KL) Name() string      { return "kl" }
-func (KL) IsBounded() bool   { return false }
+func (KL) Name() string    { return "kl" }
+func (KL) IsBounded() bool { return false }
+
+// MaxValue returns the ceiling used for KL, which is unbounded. With the
+// epsilon smoothing in klDiv, a point mass against a disjoint one yields
+// ~log2(1/epsilon), so that value is used as the cap.
+func (KL) MaxValue() float64 { return math.Log2(1 / epsilon) }
 
 func (KL) Compute(p, q []float64) float64 {
 	return klDiv(p, q)
@@ -44,6 +50,7 @@ type Hellinger struct{}
 
 func (Hellinger) Name() string      { return "hellinger" }
 func (Hellinger) IsBounded() bool   { return true }
+func (Hellinger) MaxValue() float64 { return 1 }
 
 func (Hellinger) Compute(p, q []float64) float64 {
 	sum := 0.0
@@ -52,6 +59,17 @@ func (Hellinger) Compute(p, q []float64) float64 {
 		sum += diff * diff
 	}
 	return math.Sqrt(sum / 2.0)
+}
+
+// maxDivergence returns the maximum value of d, used when one distribution
+// has no mass left (see TensionCalculator.Calculate). Divergences that do not
+// implement MaxValue are evaluated on two point masses with disjoint support,
+// which is the supremum of any f-divergence.
+func maxDivergence(d DivergenceFunc) float64 {
+	if m, ok := d.(interface{ MaxValue() float64 }); ok {
+		return m.MaxValue()
+	}
+	return d.Compute([]float64{1, 0}, []float64{0, 1})
 }
 
 func klDiv(p, q []float64) float64 {

@@ -1,0 +1,97 @@
+condition,scenario,method,replicas,auc_mean,auc_sd,hit_at_k,alarm_rule,alarm_rate,fwer,fwer_count,fwer_lo,fwer_hi,power
+"t0 sorteado em [T−4, T−1]",S0,silence-z-2pois-midp,100,,,,−Z > z(1−α/N),0.0001,0.0300,3,0.0103,0.0845,
+"t0 sorteado em [T−4, T−1]",S0,silence-z-scan-midp,100,,,,max −Z_s > z(1−α/(N·splits)),0.0001,0.0300,3,0.0103,0.0845,
+"t0 sorteado em [T−4, T−1]",S0,burst-z-2pois-midp,100,,,,Z > z(1−α/N),0.0001,0.0300,3,0.0103,0.0845,
+"t0 sorteado em [T−4, T−1]",S0,burst-z-scan-midp,100,,,,max Z_s > z(1−α/(N·splits)),0.0001,0.0500,5,0.0215,0.1118,
+"t0 sorteado em [T−4, T−1]",S0,silence-z-2pois-midp-qhat-phibands,100,,,,−Z > z(1−α/N),0.0001,0.0200,2,0.0055,0.0700,
+"t0 sorteado em [T−4, T−1]",S0,silence-z-scan-midp-qhat-phibands,100,,,,max −Z_s > z(1−α/(N·splits)),0.0001,0.0300,3,0.0103,0.0845,
+"t0 sorteado em [T−4, T−1]",S0,burst-z-2pois-midp-qhat-phibands,100,,,,Z > z(1−α/N),0.0001,0.0400,4,0.0157,0.0984,
+"t0 sorteado em [T−4, T−1]",S0,burst-z-scan-midp-qhat-phibands,100,,,,max Z_s > z(1−α/(N·splits)),0.0000,0.0200,2,0.0055,0.0700,
+"t0 sorteado em [T−4, T−1]",S1,silence-z-2pois-midp,100,1.0000,0.0000,1.0000,−Z > z(1−α/N),0.0024,1.0000,100,0.9630,1.0000,1.0000
+"t0 sorteado em [T−4, T−1]",S1,silence-z-scan-midp,100,1.0000,0.0000,1.0000,max −Z_s > z(1−α/(N·splits)),0.0023,1.0000,100,0.9630,1.0000,1.0000
+"t0 sorteado em [T−4, T−1]",S1,burst-z-2pois-midp,100,0.0000,0.0000,0.0000,Z > z(1−α/N),0.0001,0.0300,3,0.0103,0.0845,0.0000
+"t0 sorteado em [T−4, T−1]",S1,burst-z-scan-midp,100,0.0066,0.0290,0.0000,max Z_s > z(1−α/(N·splits)),0.0001,0.0500,5,0.0215,0.1118,0.0000
+"t0 sorteado em [T−4, T−1]",S1,silence-z-2pois-midp-qhat-phibands,100,1.0000,0.0000,1.0000,−Z > z(1−α/N),0.0023,1.0000,100,0.9630,1.0000,1.0000
+"t0 sorteado em [T−4, T−1]",S1,silence-z-scan-midp-qhat-phibands,100,1.0000,0.0000,1.0000,max −Z_s > z(1−α/(N·splits)),0.0023,1.0000,100,0.9630,1.0000,1.0000
+"t0 sorteado em [T−4, T−1]",S1,burst-z-2pois-midp-qhat-phibands,100,0.0000,0.0000,0.0000,Z > z(1−α/N),0.0001,0.0400,4,0.0157,0.0984,0.0000
+"t0 sorteado em [T−4, T−1]",S1,burst-z-scan-midp-qhat-phibands,100,0.0066,0.0297,0.0000,max Z_s > z(1−α/(N·splits)),0.0001,0.0400,4,0.0157,0.0984,0.0000
+"t0 sorteado em [T−4, T−1]",S2,silence-z-2pois-midp,100,0.9997,0.0019,1.0000,−Z > z(1−α/N),0.0019,0.9000,90,0.8256,0.9448,0.8900
+"t0 sorteado em [T−4, T−1]",S2,silence-z-scan-midp,100,0.9992,0.0055,0.9900,max −Z_s > z(1−α/(N·splits)),0.0017,0.8100,81,0.7222,0.8749,0.8100
+"t0 sorteado em [T−4, T−1]",S2,burst-z-2pois-midp,100,0.0003,0.0019,0.0000,Z > z(1−α/N),0.0001,0.0300,3,0.0103,0.0845,0.0000
+"t0 sorteado em [T−4, T−1]",S2,burst-z-scan-midp,100,0.0245,0.0812,0.0000,max Z_s > z(1−α/(N·splits)),0.0001,0.0500,5,0.0215,0.1118,0.0000
+"t0 sorteado em [T−4, T−1]",S2,silence-z-2pois-midp-qhat-phibands,100,0.9997,0.0019,1.0000,−Z > z(1−α/N),0.0019,0.9000,90,0.8256,0.9448,0.8900
+"t0 sorteado em [T−4, T−1]",S2,silence-z-scan-midp-qhat-phibands,100,0.9993,0.0051,0.9900,max −Z_s > z(1−α/(N·splits)),0.0017,0.8000,80,0.7112,0.8666,0.8000
+"t0 sorteado em [T−4, T−1]",S2,burst-z-2pois-midp-qhat-phibands,100,0.0003,0.0019,0.0000,Z > z(1−α/N),0.0001,0.0400,4,0.0157,0.0984,0.0000
+"t0 sorteado em [T−4, T−1]",S2,burst-z-scan-midp-qhat-phibands,100,0.0242,0.0812,0.0000,max Z_s > z(1−α/(N·splits)),0.0001,0.0400,4,0.0157,0.0984,0.0000
+"t0 sorteado em [T−4, T−1]",S3,silence-z-2pois-midp,100,0.9982,0.0124,0.9800,−Z > z(1−α/N),0.0018,0.8600,86,0.7786,0.9147,0.8600
+"t0 sorteado em [T−4, T−1]",S3,silence-z-scan-midp,100,0.9980,0.0098,0.9700,max −Z_s > z(1−α/(N·splits)),0.0016,0.7900,79,0.7002,0.8583,0.7600
+"t0 sorteado em [T−4, T−1]",S3,burst-z-2pois-midp,100,0.0018,0.0124,0.0000,Z > z(1−α/N),0.0001,0.0300,3,0.0103,0.0845,0.0000
+"t0 sorteado em [T−4, T−1]",S3,burst-z-scan-midp,100,0.0297,0.0887,0.0000,max Z_s > z(1−α/(N·splits)),0.0001,0.0500,5,0.0215,0.1118,0.0000
+"t0 sorteado em [T−4, T−1]",S3,silence-z-2pois-midp-qhat-phibands,100,0.9983,0.0118,0.9900,−Z > z(1−α/N),0.0018,0.8600,86,0.7786,0.9147,0.8600
+"t0 sorteado em [T−4, T−1]",S3,silence-z-scan-midp-qhat-phibands,100,0.9980,0.0096,0.9700,max −Z_s > z(1−α/(N·splits)),0.0016,0.7900,79,0.7002,0.8583,0.7600
+"t0 sorteado em [T−4, T−1]",S3,burst-z-2pois-midp-qhat-phibands,100,0.0017,0.0118,0.0000,Z > z(1−α/N),0.0001,0.0400,4,0.0157,0.0984,0.0000
+"t0 sorteado em [T−4, T−1]",S3,burst-z-scan-midp-qhat-phibands,100,0.0294,0.0885,0.0000,max Z_s > z(1−α/(N·splits)),0.0001,0.0300,3,0.0103,0.0845,0.0000
+"t0 sorteado em [T−4, T−1]",S4,silence-z-2pois-midp,100,0.5185,0.2936,0.0300,−Z > z(1−α/N),0.0001,0.0300,3,0.0103,0.0845,0.0000
+"t0 sorteado em [T−4, T−1]",S4,silence-z-scan-midp,100,0.5232,0.2890,0.0100,max −Z_s > z(1−α/(N·splits)),0.0001,0.0300,3,0.0103,0.0845,0.0000
+"t0 sorteado em [T−4, T−1]",S4,burst-z-2pois-midp,100,0.4815,0.2936,0.0300,Z > z(1−α/N),0.0001,0.0300,3,0.0103,0.0845,0.0000
+"t0 sorteado em [T−4, T−1]",S4,burst-z-scan-midp,100,0.5006,0.2852,0.0300,max Z_s > z(1−α/(N·splits)),0.0001,0.0500,5,0.0215,0.1118,0.0000
+"t0 sorteado em [T−4, T−1]",S4,silence-z-2pois-midp-qhat-phibands,100,0.5174,0.2939,0.0300,−Z > z(1−α/N),0.0001,0.0200,2,0.0055,0.0700,0.0000
+"t0 sorteado em [T−4, T−1]",S4,silence-z-scan-midp-qhat-phibands,100,0.5228,0.2883,0.0100,max −Z_s > z(1−α/(N·splits)),0.0001,0.0300,3,0.0103,0.0845,0.0000
+"t0 sorteado em [T−4, T−1]",S4,burst-z-2pois-midp-qhat-phibands,100,0.4826,0.2939,0.0300,Z > z(1−α/N),0.0001,0.0400,4,0.0157,0.0984,0.0000
+"t0 sorteado em [T−4, T−1]",S4,burst-z-scan-midp-qhat-phibands,100,0.5007,0.2852,0.0300,max Z_s > z(1−α/(N·splits)),0.0000,0.0200,2,0.0055,0.0700,0.0000
+"t0 sorteado em [T−4, T−1]",S5,silence-z-2pois-midp,100,0.0000,0.0000,0.0000,−Z > z(1−α/N),0.0001,0.0300,3,0.0103,0.0845,0.0000
+"t0 sorteado em [T−4, T−1]",S5,silence-z-scan-midp,100,0.0009,0.0082,0.0000,max −Z_s > z(1−α/(N·splits)),0.0001,0.0300,3,0.0103,0.0845,0.0000
+"t0 sorteado em [T−4, T−1]",S5,burst-z-2pois-midp,100,1.0000,0.0000,1.0000,Z > z(1−α/N),0.0027,0.9900,99,0.9455,0.9982,0.9900
+"t0 sorteado em [T−4, T−1]",S5,burst-z-scan-midp,100,1.0000,0.0002,1.0000,max Z_s > z(1−α/(N·splits)),0.0026,0.9900,99,0.9455,0.9982,0.9900
+"t0 sorteado em [T−4, T−1]",S5,silence-z-2pois-midp-qhat-phibands,100,0.0000,0.0000,0.0000,−Z > z(1−α/N),0.0001,0.0400,4,0.0157,0.0984,0.0000
+"t0 sorteado em [T−4, T−1]",S5,silence-z-scan-midp-qhat-phibands,100,0.0008,0.0074,0.0000,max −Z_s > z(1−α/(N·splits)),0.0001,0.0400,4,0.0157,0.0984,0.0000
+"t0 sorteado em [T−4, T−1]",S5,burst-z-2pois-midp-qhat-phibands,100,1.0000,0.0000,1.0000,Z > z(1−α/N),0.0027,0.9900,99,0.9455,0.9982,0.9900
+"t0 sorteado em [T−4, T−1]",S5,burst-z-scan-midp-qhat-phibands,100,1.0000,0.0002,1.0000,max Z_s > z(1−α/(N·splits)),0.0025,0.9900,99,0.9455,0.9982,0.9900
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S0,silence-z-2pois-midp,100,,,,−Z > z(1−α/N),0.0307,0.6200,62,0.5221,0.7090,
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S0,silence-z-scan-midp,100,,,,max −Z_s > z(1−α/(N·splits)),0.0530,1.0000,100,0.9630,1.0000,
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S0,burst-z-2pois-midp,100,,,,Z > z(1−α/N),0.0000,0.0200,2,0.0055,0.0700,
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S0,burst-z-scan-midp,100,,,,max Z_s > z(1−α/(N·splits)),0.0000,0.0200,2,0.0055,0.0700,
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S0,silence-z-2pois-midp-qhat-phibands,100,,,,−Z > z(1−α/N),0.0000,0.0000,0,0.0000,0.0370,
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S0,silence-z-scan-midp-qhat-phibands,100,,,,max −Z_s > z(1−α/(N·splits)),0.0000,0.0100,1,0.0018,0.0545,
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S0,burst-z-2pois-midp-qhat-phibands,100,,,,Z > z(1−α/N),0.0000,0.0000,0,0.0000,0.0370,
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S0,burst-z-scan-midp-qhat-phibands,100,,,,max Z_s > z(1−α/(N·splits)),0.0000,0.0000,0,0.0000,0.0370,
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S1,silence-z-2pois-midp,100,0.9982,0.0061,0.9700,−Z > z(1−α/N),0.0340,1.0000,100,0.9630,1.0000,1.0000
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S1,silence-z-scan-midp,100,0.9982,0.0064,0.9700,max −Z_s > z(1−α/(N·splits)),0.0564,1.0000,100,0.9630,1.0000,1.0000
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S1,burst-z-2pois-midp,100,0.0018,0.0061,0.0000,Z > z(1−α/N),0.0000,0.0200,2,0.0055,0.0700,0.0000
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S1,burst-z-scan-midp,100,0.0469,0.1321,0.0000,max Z_s > z(1−α/(N·splits)),0.0000,0.0200,2,0.0055,0.0700,0.0000
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S1,silence-z-2pois-midp-qhat-phibands,100,1.0000,0.0000,1.0000,−Z > z(1−α/N),0.0020,0.9400,94,0.8752,0.9722,0.9400
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S1,silence-z-scan-midp-qhat-phibands,100,1.0000,0.0003,1.0000,max −Z_s > z(1−α/(N·splits)),0.0019,0.9200,92,0.8500,0.9589,0.9200
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S1,burst-z-2pois-midp-qhat-phibands,100,0.0000,0.0000,0.0000,Z > z(1−α/N),0.0000,0.0100,1,0.0018,0.0545,0.0000
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S1,burst-z-scan-midp-qhat-phibands,100,0.0276,0.0912,0.0000,max Z_s > z(1−α/(N·splits)),0.0000,0.0000,0,0.0000,0.0370,0.0000
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S2,silence-z-2pois-midp,100,0.9880,0.0332,0.8400,−Z > z(1−α/N),0.0331,1.0000,100,0.9630,1.0000,0.9500
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S2,silence-z-scan-midp,100,0.9835,0.0381,0.7800,max −Z_s > z(1−α/(N·splits)),0.0554,1.0000,100,0.9630,1.0000,0.9000
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S2,burst-z-2pois-midp,100,0.0120,0.0332,0.0000,Z > z(1−α/N),0.0000,0.0200,2,0.0055,0.0700,0.0000
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S2,burst-z-scan-midp,100,0.0768,0.1759,0.0000,max Z_s > z(1−α/(N·splits)),0.0000,0.0200,2,0.0055,0.0700,0.0000
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S2,silence-z-2pois-midp-qhat-phibands,100,0.9991,0.0044,0.9900,−Z > z(1−α/N),0.0015,0.7300,73,0.6357,0.8073,0.7300
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S2,silence-z-scan-midp-qhat-phibands,100,0.9966,0.0143,0.9500,max −Z_s > z(1−α/(N·splits)),0.0013,0.6600,66,0.5628,0.7454,0.6600
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S2,burst-z-2pois-midp-qhat-phibands,100,0.0009,0.0044,0.0000,Z > z(1−α/N),0.0000,0.0100,1,0.0018,0.0545,0.0000
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S2,burst-z-scan-midp-qhat-phibands,100,0.0481,0.1327,0.0000,max Z_s > z(1−α/(N·splits)),0.0000,0.0000,0,0.0000,0.0370,0.0000
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S3,silence-z-2pois-midp,100,0.9602,0.1117,0.7400,−Z > z(1−α/N),0.0330,1.0000,100,0.9630,1.0000,0.8600
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S3,silence-z-scan-midp,100,0.9536,0.1067,0.6700,max −Z_s > z(1−α/(N·splits)),0.0550,1.0000,100,0.9630,1.0000,0.7800
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S3,burst-z-2pois-midp,100,0.0398,0.1117,0.0000,Z > z(1−α/N),0.0000,0.0200,2,0.0055,0.0700,0.0000
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S3,burst-z-scan-midp,100,0.0759,0.1713,0.0000,max Z_s > z(1−α/(N·splits)),0.0000,0.0200,2,0.0055,0.0700,0.0000
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S3,silence-z-2pois-midp-qhat-phibands,100,0.9970,0.0179,0.9600,−Z > z(1−α/N),0.0014,0.6900,69,0.5937,0.7722,0.6900
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S3,silence-z-scan-midp-qhat-phibands,100,0.9949,0.0183,0.9200,max −Z_s > z(1−α/(N·splits)),0.0013,0.6600,66,0.5628,0.7454,0.6500
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S3,burst-z-2pois-midp-qhat-phibands,100,0.0030,0.0179,0.0000,Z > z(1−α/N),0.0000,0.0000,0,0.0000,0.0370,0.0000
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S3,burst-z-scan-midp-qhat-phibands,100,0.0493,0.1281,0.0000,max Z_s > z(1−α/(N·splits)),0.0000,0.0000,0,0.0000,0.0370,0.0000
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S4,silence-z-2pois-midp,100,0.3882,0.2960,0.0100,−Z > z(1−α/N),0.0307,0.6200,62,0.5221,0.7090,0.0000
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S4,silence-z-scan-midp,100,0.2656,0.2220,0.0000,max −Z_s > z(1−α/(N·splits)),0.0530,1.0000,100,0.9630,1.0000,0.0000
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S4,burst-z-2pois-midp,100,0.6118,0.2960,0.0900,Z > z(1−α/N),0.0000,0.0200,2,0.0055,0.0700,0.0000
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S4,burst-z-scan-midp,100,0.5459,0.2939,0.0600,max Z_s > z(1−α/(N·splits)),0.0000,0.0200,2,0.0055,0.0700,0.0000
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S4,silence-z-2pois-midp-qhat-phibands,100,0.5100,0.3096,0.0100,−Z > z(1−α/N),0.0000,0.0000,0,0.0000,0.0370,0.0000
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S4,silence-z-scan-midp-qhat-phibands,100,0.4795,0.2777,0.0000,max −Z_s > z(1−α/(N·splits)),0.0000,0.0100,1,0.0018,0.0545,0.0000
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S4,burst-z-2pois-midp-qhat-phibands,100,0.4900,0.3096,0.0400,Z > z(1−α/N),0.0000,0.0000,0,0.0000,0.0370,0.0000
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S4,burst-z-scan-midp-qhat-phibands,100,0.5161,0.3012,0.0200,max Z_s > z(1−α/(N·splits)),0.0000,0.0000,0,0.0000,0.0370,0.0000
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S5,silence-z-2pois-midp,100,0.0000,0.0000,0.0000,−Z > z(1−α/N),0.0301,0.6200,62,0.5221,0.7090,0.0000
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S5,silence-z-scan-midp,100,0.0005,0.0036,0.0000,max −Z_s > z(1−α/(N·splits)),0.0522,1.0000,100,0.9630,1.0000,0.0000
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S5,burst-z-2pois-midp,100,1.0000,0.0000,1.0000,Z > z(1−α/N),0.0024,0.9300,93,0.8625,0.9657,0.9300
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S5,burst-z-scan-midp,100,0.9996,0.0020,1.0000,max Z_s > z(1−α/(N·splits)),0.0023,0.9400,94,0.8752,0.9722,0.9300
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S5,silence-z-2pois-midp-qhat-phibands,100,0.0000,0.0000,0.0000,−Z > z(1−α/N),0.0000,0.0100,1,0.0018,0.0545,0.0000
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S5,silence-z-scan-midp-qhat-phibands,100,0.0004,0.0021,0.0000,max −Z_s > z(1−α/(N·splits)),0.0000,0.0100,1,0.0018,0.0545,0.0000
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S5,burst-z-2pois-midp-qhat-phibands,100,1.0000,0.0000,1.0000,Z > z(1−α/N),0.0024,0.9800,98,0.9300,0.9945,0.9800
+"extra: t0 sorteado + Seasonality A = 0.3, P = 4",S5,burst-z-scan-midp-qhat-phibands,100,1.0000,0.0000,1.0000,max Z_s > z(1−α/(N·splits)),0.0022,0.9600,96,0.9016,0.9843,0.9600

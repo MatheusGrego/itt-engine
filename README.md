@@ -19,7 +19,6 @@ package main
 
 import (
     "fmt"
-    "time"
 
     itt "github.com/MatheusGrego/itt-engine"
 )
@@ -27,34 +26,57 @@ import (
 func main() {
     engine, _ := itt.NewBuilder().
         Threshold(0.3).
-        OnAnomaly(func(r itt.TensionResult) {
-            fmt.Printf("Anomaly: node=%s tension=%.4f\n", r.NodeID, r.Tension)
-        }).
         Build()
 
-    // Ingest events
+    // alice and bob spread their calls over three services. carol only calls
+    // service:legacy and dave sends 3 of his 4 calls there.
     events := []itt.Event{
         {Source: "user:alice", Target: "service:api", Weight: 1},
-        {Source: "user:alice", Target: "service:api", Weight: 1},
-        {Source: "user:alice", Target: "service:api", Weight: 1},
-        {Source: "user:bob", Target: "service:db", Weight: 1},
+        {Source: "user:alice", Target: "service:db", Weight: 1},
+        {Source: "user:alice", Target: "service:cache", Weight: 1},
         {Source: "user:bob", Target: "service:api", Weight: 1},
-        {Source: "user:charlie", Target: "service:db", Weight: 50}, // suspicious
+        {Source: "user:bob", Target: "service:db", Weight: 1},
+        {Source: "user:bob", Target: "service:cache", Weight: 1},
+        {Source: "user:carol", Target: "service:legacy", Weight: 1},
+        {Source: "user:dave", Target: "service:legacy", Weight: 3},
+        {Source: "user:dave", Target: "service:api", Weight: 1},
     }
     for _, ev := range events {
         engine.AddEvent(ev)
     }
 
-    // Wait for events to process, then analyze
-    time.Sleep(50 * time.Millisecond)
+    // Stop drains the event queue before returning.
+    engine.Stop()
 
     results, _ := engine.Analyze()
+    for _, r := range results.Anomalies {
+        fmt.Printf("Anomaly: node=%s tension=%.4f\n", r.NodeID, r.Tension)
+    }
     fmt.Printf("Analyzed %d nodes, found %d anomalies\n",
         results.Stats.NodesAnalyzed, results.Stats.AnomalyCount)
-
-    engine.Stop()
 }
 ```
+
+Output:
+
+```
+Anomaly: node=service:legacy tension=0.7744
+Analyzed 8 nodes, found 1 anomalies
+```
+
+Today τ measures how much a node's neighbors depend on it: `service:legacy` is flagged because carol sends all of her weight there and dave 75% of his, while api, db and cache get small shares (τ ≈ 0.17 to 0.19). This example runs as `ExampleEngine_readme` in `example_test.go`.
+
+## Current status / known limitations
+
+The engine is under refinement (audit of 2026-09-29). In short:
+
+- **What τ measures today.** τ(v) is leave-one-out: for each neighbor n, how much n's outgoing weight distribution changes if v is removed, averaged over the neighbors. That is counterfactual importance, not absence: a node that has already gone silent gets τ = 0. The `D(P_observed || P_expected)` formula below is the goal; there is no `P_expected` in the code yet.
+- **The divergence does not change the ranking.** In leave-one-out, JSD, Hellinger and KL are all increasing functions of p = w(n→v)/W_out(n) alone.
+- **Volume is ignored.** 1 event and 10,000 events in the same proportion give the same τ.
+- **Ingestion cost grows with the graph.** Each event deep-copies the overlay graph: ~1.2 ms/event at 1k events and ~7 ms/event at 20k events on ~1k nodes, end to end (see Performance). `AddEvent`'s ~131 ns is only the enqueue.
+- **Real-time alerts during warm-up.** `OnAnomaly` evaluates τ per event on the partial graph. While a source has only one target, that target gets τ = 1 (p = 1), so expect alerts while the graph warms up.
+
+Problems, IDs and the plan: [docs/refinement/BACKLOG.md](docs/refinement/BACKLOG.md).
 
 ## Architecture
 
@@ -90,7 +112,7 @@ Tension measures how "surprising" a node's connections are:
 tau(v) = D(P_observed || P_expected)
 ```
 
-Where `D` is a divergence function (JSD by default). High tension = the node's interaction pattern deviates from expectation.
+Where `D` is a divergence function (JSD by default). High tension = the node's interaction pattern deviates from expectation. This is the target formulation; the current code computes a leave-one-out version (see [Current status](#current-status--known-limitations)).
 
 ### MVCC Snapshots
 
@@ -261,7 +283,7 @@ Three built-in divergence measures in `analysis/`:
 
 | Function | Formula | Properties | Bounded |
 |----------|---------|------------|---------|
-| `JSD` | Jensen-Shannon Divergence | Symmetric, [0, ln2] | Yes |
+| `JSD` | Jensen-Shannon Divergence | Symmetric, [0, 1] (log base 2) | Yes |
 | `KL` | Kullback-Leibler Divergence | Asymmetric, unbounded | No |
 | `Hellinger` | Hellinger Distance | Symmetric, [0, 1] | Yes |
 
@@ -659,7 +681,7 @@ Benchmarked on AMD Ryzen 5 3600:
 
 | Operation | Latency | Notes |
 |-----------|---------|-------|
-| AddEvent | ~131 ns/op | ~7.6M events/sec |
+| AddEvent | ~131 ns/op | enqueue only (channel send); processing is asynchronous |
 | Snapshot | ~157 ns/op | |
 | AnalyzeNode | ~1.2 us/op | |
 | Analyze (100 nodes) | ~475 us | |
@@ -671,6 +693,17 @@ Benchmarked on AMD Ryzen 5 3600:
 | TensionHistory.Push | ~5.9 ns/op | ring buffer |
 | FiedlerApprox (100 nodes) | ~348 us | Cheeger bound |
 | CheckAnomalies overhead | ~115 ns/op | per-event temporal tracking |
+
+End-to-end ingestion (`BenchmarkIngestEndToEnd`: build the engine, `AddEvent` × N with random source and target over ~1k nodes, then `Stop()` to drain), measured on a 4 vCPU container (Intel Xeon @ 2.80GHz), two runs each:
+
+| Events | Per event | Total | Memory per run |
+|--------|-----------|-------|----------------|
+| 1k | ~1.1–1.3 ms | ~1.2 s | ~0.5 GB |
+| 5k | ~4.0–4.1 ms | ~20 s | ~6.8 GB |
+| 20k | ~7.2–7.3 ms | ~146 s | ~43 GB |
+| 50k | ~6.6–6.9 ms | ~336 s | ~107 GB |
+
+The cost per event grows with the graph because every event deep-copies the current overlay graph (F1 in the backlog); it levels off past 10k events because compaction (default: every 10k events) empties the overlay. About 64% of the CPU time is in `deepCopyGraph` and most of the rest is GC.
 
 ## License
 
