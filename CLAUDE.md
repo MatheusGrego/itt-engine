@@ -36,6 +36,8 @@ Use sempre `CGO_ENABLED=0` fora da máquina do Matheus: o backend GPU (`gpu/`, c
 - Se um teste pré-existente falhar antes de você mexer, registre no relatório e siga. Não "conserte" o teste pra passar.
 - Se travar numa decisão que muda a teoria, escolha a opção mais conservadora, registre em `docs/refinement/OPEN-QUESTIONS.md` e siga.
 - Docs novos em PT-BR. Código e comentários de código em inglês.
+- Dados baixados (GH Archive etc.) ficam em `.cache/` (gitignored). No git só entram agregados pequenos (< 1 MB). Nunca invente dados: se a fonte estiver bloqueada, registre e pule.
+- Parâmetros de método saem do harness sintético, nunca de um caso real. Caso real é só teste.
 
 ## Arquitetura (curta)
 
