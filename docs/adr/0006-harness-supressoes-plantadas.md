@@ -48,3 +48,28 @@ Um comando gera a tabela de todos os cenários para o τ atual em < 1 min num gr
 ## Relacionados
 
 Todas as ADRs de teoria (0001 a 0004).
+
+## Resultados (harness 2026-09-29)
+
+Comando: `go run ./cmd/itt-harness` (N = 500, T = 12, t0 = 8, 20 réplicas com sementes 1..20, α = 0.05). Células: AUC média ± desvio / hit@10. Arquivos completos em `docs/refinement/results/`. O status desta ADR **não muda** com isto: só o Matheus aceita ou rejeita.
+
+| Cenário | tau-jsd (M1) | tau-jsd-cumulative (M2) | silence-deviance-v0 (M3) | burst-deviance-v0 (M4) |
+|---|---|---|---|---|
+| S1 remoção | 0.074 ± 0.010 / 0.00 | 0.499 ± 0.217 / 0.00 | 1.000 ± 0.000 / 1.00 | 0.026 ± 0.005 / 0.00 |
+| S2 afinamento | 0.408 ± 0.186 / 0.00 | 0.526 ± 0.222 / 0.00 | 0.999 ± 0.001 / 1.00 | 0.026 ± 0.005 / 0.00 |
+| S3 sniper | 0.074 ± 0.010 / 0.00 | 0.074 ± 0.010 / 0.00 | 0.992 ± 0.024 / 0.90 | 0.026 ± 0.005 / 0.00 |
+| S4 eremita (controle) | 0.073 ± 0.010 / 0.00 | 0.073 ± 0.010 / 0.00 | 0.187 ± 0.207 / 0.00 | 0.230 ± 0.206 / 0.00 |
+| S5 burst | 0.775 ± 0.233 / 0.20 | 0.674 ± 0.238 / 0.05 | 0.024 ± 0.007 / 0.00 | 1.000 ± 0.000 / 1.00 |
+
+Falsos positivos sob o nulo (S0), cada método com a própria regra de alarme:
+
+| Método | Regra | Nós em alarme (média) | FWER |
+|---|---|---|---|
+| tau-jsd | τ > 0.2 | 1.74% | 1.00 |
+| tau-jsd-cumulative | τ > 0.2 | 1.49% | 1.00 |
+| silence-deviance-v0 | S/2 > ln(1/α) + ln N | 8.35% | 1.00 |
+| burst-deviance-v0 | B/2 > ln(1/α) + ln N | 9.44% | 1.00 |
+
+- **Critério desta ADR: passou.** Um comando gera a tabela de todos os cenários em ~9 s com N = 500 e em ~19 s com N = 1000 (container de 4 vCPU, Intel Xeon @ 2.80GHz). Com N = 1000 o ranking fica praticamente igual (S1: M1 0.071, M3 1.000).
+- **O que ganhou onde:** o silence deviance (M3) ranqueia o alvo em S1, S2 e S3 com AUC ≥ 0.99; o burst deviance (M4) ranqueia o S5 com 1.000. O τ atual (M1/M2) não passa de ~0.5 em nenhum cenário de supressão. O M1 dá τ = 0 ao nó removido (T1 aparecendo na tabela: a AUC de 0.074 é metade da fração de nós que também têm τ = 0), e o sniper do S3, que só tem arestas de saída, tem τ = 0 em qualquer janela, até no acumulado.
+- **Surpresa:** nenhum método segura o falso positivo sob o nulo. Todos têm FWER 1.00, inclusive o M3 com o limiar em bits (causa na ADR-0002). No S3, o hit@10 do M3 é 0.90: às vezes os hubs que recebiam o sniper ficam acima dele, porque herdam o silêncio das mesmas arestas e somam o ruído das suas.

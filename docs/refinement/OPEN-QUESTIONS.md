@@ -31,3 +31,12 @@ Formato: `Q<n> (ID do backlog, data)`.
 - **Decidido:** essas arestas ficam fora de S e de B (`harness.Deviance`). Isso não mexe no S (com `e = 0` não existe `o < e`), só no B: aresta nova não conta como burst.
 - **Por quê:** é a leitura literal do plano sem produzir infinito. Um B infinito empataria no topo todo nó que ganhou uma aresta por acaso (com λ ≈ 0.3, uma aresta real fica 8 janelas zerada com chance de ~9%).
 - **Pergunta:** aresta nova deveria contar como burst (ex.: `e` = floor de 0.5 também para ela, ou um prior por nó)? Isso é decisão da ADR-0003 (modelo nulo).
+
+## Q5 (ADR-0002/0004, 2026-09-29): o limiar em bits não segura o FP sob o nulo
+
+- **Fato:** no harness, com a regra do plano (S/2 > ln(1/α) + ln N, α = 0.05), o silence deviance alarma em 8.35% dos nós por réplica sob o S0 e o FWER é 1.00. O desvio médio por aresta sob o nulo é 1.54 (esperado 1 para χ²₁ com `e` conhecido): o `e` estimado de 8 janelas soma a variância dele à do `o`, e (T − t0)/t0 = 0.5 prevê exatamente esse fator de ~1.5. Além disso, S(v) soma todas as arestas do nó, então cresce com o grau (grau médio 28.2 nos nós em alarme contra 9.4 no geral).
+- **Decidido:** nada mudou no método nem na regra. Os números entram como resultado na ADR-0002 e na ADR-0006, sem mexer em status.
+- **Pergunta (para a ADR-0004):** qual calibração? Opções que vi, sem testar:
+  1. comparar S(v) com o quantil de χ² com k = número de arestas do nó (lidando com o fato de S só somar o lado o < e);
+  2. inflar o esperado pelo ruído do baseline (fator 1 + (T − t0)/t0) ou usar um teste de razão entre dois Poisson (antes contra depois) em vez de tratar `e` como conhecido;
+  3. nulo empírico: calibrar o limiar por grau no próprio S0 ou por permutação de janelas.

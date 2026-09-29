@@ -50,3 +50,28 @@ Harness: AUC(S) > AUC(τ atual) em S1, S2 e S3; em S5 (burst), S não dispara e 
 ## Relacionados
 
 ADR-0001, ADR-0003, ADR-0004, ADR-0006.
+
+## Resultados (harness 2026-09-29)
+
+Comando: `go run ./cmd/itt-harness` (N = 500, T = 12, t0 = 8, 20 réplicas com sementes 1..20, α = 0.05). Células: AUC média ± desvio / hit@10. Arquivos completos em `docs/refinement/results/`. O status desta ADR **não muda** com isto: só o Matheus aceita ou rejeita.
+
+| Cenário | tau-jsd (M1) | tau-jsd-cumulative (M2) | silence-deviance-v0 (M3) | burst-deviance-v0 (M4) |
+|---|---|---|---|---|
+| S1 remoção | 0.074 ± 0.010 / 0.00 | 0.499 ± 0.217 / 0.00 | 1.000 ± 0.000 / 1.00 | 0.026 ± 0.005 / 0.00 |
+| S2 afinamento | 0.408 ± 0.186 / 0.00 | 0.526 ± 0.222 / 0.00 | 0.999 ± 0.001 / 1.00 | 0.026 ± 0.005 / 0.00 |
+| S3 sniper | 0.074 ± 0.010 / 0.00 | 0.074 ± 0.010 / 0.00 | 0.992 ± 0.024 / 0.90 | 0.026 ± 0.005 / 0.00 |
+| S4 eremita (controle) | 0.073 ± 0.010 / 0.00 | 0.073 ± 0.010 / 0.00 | 0.187 ± 0.207 / 0.00 | 0.230 ± 0.206 / 0.00 |
+| S5 burst | 0.775 ± 0.233 / 0.20 | 0.674 ± 0.238 / 0.05 | 0.024 ± 0.007 / 0.00 | 1.000 ± 0.000 / 1.00 |
+
+Falsos positivos sob o nulo (S0), cada método com a própria regra de alarme:
+
+| Método | Regra | Nós em alarme (média) | FWER |
+|---|---|---|---|
+| tau-jsd | τ > 0.2 | 1.74% | 1.00 |
+| tau-jsd-cumulative | τ > 0.2 | 1.49% | 1.00 |
+| silence-deviance-v0 | S/2 > ln(1/α) + ln N | 8.35% | 1.00 |
+| burst-deviance-v0 | B/2 > ln(1/α) + ln N | 9.44% | 1.00 |
+
+- **Ranking: o S ganhou onde o critério pede.** AUC do M3 contra o τ atual: S1 1.000 contra 0.074 (M1) e 0.499 (M2); S2 0.999 contra 0.408 e 0.526; S3 0.992 contra 0.074 e 0.074. Em S5 o S não sobe (0.024) e o B vai a 1.000, como a decisão prevê.
+- **FP sob o nulo: o critério não passou.** Com a regra S/2 > ln(1/α) + ln N, 8.35% dos nós alarmam por réplica e as 20 réplicas têm pelo menos um alarme (FWER 1.00 contra α = 0.05). Medido: o desvio médio por aresta sob o nulo é 1.54, não 1, porque o esperado vem de só 8 janelas; e S(v) é uma soma sobre arestas, então cresce com o grau (grau médio 28.2 nos nós em alarme contra 9.4 no geral; entre os nós de grau ≤ 7, a taxa cai para 0.60%). O limiar não conta graus de liberdade nem o ruído do baseline. Isso fica para a ADR-0004 (ver Q5 em `docs/refinement/OPEN-QUESTIONS.md`).
+- **Surpresa:** o τ atual com os pesos do período depois (M1) reage mais ao burst (S5: 0.775) do que a qualquer supressão, e o M2, que acumula tudo como a engine faz hoje, fica no nível do chute em S1 e S2 (~0.5).
