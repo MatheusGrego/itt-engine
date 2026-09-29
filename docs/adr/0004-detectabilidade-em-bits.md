@@ -46,3 +46,18 @@ Harness sob o nulo puro: a fração de nós acima do limiar ≈ α (±IC). No ha
 ## Relacionados
 
 ADR-0002, ADR-0006.
+
+## Resultados (harness fase 2b)
+
+Arquivos completos em `docs/refinement/results/fase2b-*.md`. O status continua **Proposto**. O limiar testado não foi o S/2 > ln(1/α) + ln N da decisão (que dá FWER 1.00, ver Q5), e sim **−Z > z(1 − α/N)** sobre o Z de Stouffer do M5, unilateral com Bonferroni.
+
+- **Nulo puro (critério desta ADR, "fração acima do limiar ≈ α"):**
+  - FWER 0.035 [0.017, 0.070] com o mid-p, R = 200.
+  - Por nó, a taxa a 1e-3 fica em ×0.98 do nominal (10⁵ nós-réplica).
+  - **Passa sob Poisson.** O signed root do protótipo passa por pouco no default (×1.48 por nó) e **falha com pouca contagem** (FWER 0.130), porque o viés por aresta vira b·√k no Stouffer (Q6).
+- **Poder (Yharim empírico, Tarefa 5):**
+  - 80% de poder quando Σ(√e − √o)² ≈ 10–13, o que dá 45 a 117 eventos esperados perdidos, conforme o grau e as janelas.
+  - A previsão Poisson/Stouffer bate em ±0.10 com ≥ 2 janelas depois e é otimista em até 0.22 com 1 janela.
+  - Afinamento de 10% nunca é detectado.
+- **t0 desconhecido (Tarefa 6):** scan com Bonferroni em N·4 tem FWER 0.02–0.05 e custa de 8 a 10 pontos de poder. **Sem o q̂**, uma sazonalidade fora de fase leva o scan a FWER 1.00.
+- **Consequência para a decisão:** o limiar vindo da teoria só é auditável se o nulo for Poisson estacionário. A consequência (−) desta ADR ("sobredispersão real faz a aproximação Poisson subestimar o ruído") foi medida: k = 10 dá FWER 0.54 sem φ̂. O fallback é obrigatório, não opcional.

@@ -73,3 +73,19 @@ Falsos positivos sob o nulo (S0), cada método com a própria regra de alarme:
 - **Critério desta ADR: passou.** Um comando gera a tabela de todos os cenários em ~9 s com N = 500 e em ~19 s com N = 1000 (container de 4 vCPU, Intel Xeon @ 2.80GHz). Com N = 1000 o ranking fica praticamente igual (S1: M1 0.071, M3 1.000).
 - **O que ganhou onde:** o silence deviance (M3) ranqueia o alvo em S1, S2 e S3 com AUC ≥ 0.99; o burst deviance (M4) ranqueia o S5 com 1.000. O τ atual (M1/M2) não passa de ~0.5 em nenhum cenário de supressão. O M1 dá τ = 0 ao nó removido (T1 aparecendo na tabela: a AUC de 0.074 é metade da fração de nós que também têm τ = 0), e o sniper do S3, que só tem arestas de saída, tem τ = 0 em qualquer janela, até no acumulado.
 - **Surpresa:** nenhum método segura o falso positivo sob o nulo. Todos têm FWER 1.00, inclusive o M3 com o limiar em bits (causa na ADR-0002). No S3, o hit@10 do M3 é 0.90: às vezes os hubs que recebiam o sniper ficam acima dele, porque herdam o silêncio das mesmas arestas e somam o ruído das suas.
+
+## Resultados (harness fase 2b)
+
+O status continua **Proposto**. O harness ganhou, sem mudar o default do gerador (teste de igualdade bit a bit):
+
+| Recurso | Opções |
+|---|---|
+| Stress | `Dispersion`, `Trend`, `Seasonality`, `Drift` (extra), `RateMu` |
+| Poder | `S2x` com `ThinMult`, faixa de grau `TargetLo/Hi` e `PartialFrac` (extra) |
+| t0 | `T0Random` |
+| Relay latente | `GenerateRelay` |
+
+- **Experimentos:** cada um roda com um comando, `go run ./cmd/itt-harness -exp <discreteness|stress|corrections|power|scan|relay> -r <R>`. Tempos no container de 4 vCPU, em paralelo: 47 s, 2m15s, 3m37s, 38 s, 52 s e 3 s. O `-exp` grava `fase2b-<exp>.md` e `.csv` em `docs/refinement/results/`.
+- **Incerteza:** toda tabela reporta a AUC como média ± desvio e o FWER com IC 95% de Wilson.
+- **O viés conhecido desta ADR (o gerador tem as mesmas hipóteses do método) foi confirmado.** O M5 passa no gerador base e quebra com qualquer um dos eixos de stress (FWER de 0.14 a 1.00). A lição para a regra desta ADR: uma linha na tabela do gerador base **não basta** para aceitar uma ADR de estatística; é preciso a tabela de stress também.
+- **Caso real (mitigação desta ADR):** não rodou. O `data.gharchive.org` foi bloqueado pela rede do ambiente (Q8).

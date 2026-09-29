@@ -75,3 +75,20 @@ Falsos positivos sob o nulo (S0), cada método com a própria regra de alarme:
 - **Ranking: o S ganhou onde o critério pede.** AUC do M3 contra o τ atual: S1 1.000 contra 0.074 (M1) e 0.499 (M2); S2 0.999 contra 0.408 e 0.526; S3 0.992 contra 0.074 e 0.074. Em S5 o S não sobe (0.024) e o B vai a 1.000, como a decisão prevê.
 - **FP sob o nulo: o critério não passou.** Com a regra S/2 > ln(1/α) + ln N, 8.35% dos nós alarmam por réplica e as 20 réplicas têm pelo menos um alarme (FWER 1.00 contra α = 0.05). Medido: o desvio médio por aresta sob o nulo é 1.54, não 1, porque o esperado vem de só 8 janelas; e S(v) é uma soma sobre arestas, então cresce com o grau (grau médio 28.2 nos nós em alarme contra 9.4 no geral; entre os nós de grau ≤ 7, a taxa cai para 0.60%). O limiar não conta graus de liberdade nem o ruído do baseline. Isso fica para a ADR-0004 (ver Q5 em `docs/refinement/OPEN-QUESTIONS.md`).
 - **Surpresa:** o τ atual com os pesos do período depois (M1) reage mais ao burst (S5: 0.775) do que a qualquer supressão, e o M2, que acumula tudo como a engine faz hoje, fica no nível do chute em S1 e S2 (~0.5).
+
+## Resultados (harness fase 2b)
+
+Arquivos completos em `docs/refinement/results/fase2b-*.md`. O status continua **Proposto**. O M5/M6 é a variante por nó desta ADR: o esperado vem de um teste de duas Poisson condicionado no total da aresta (antes × depois), com Stouffer por nó, Z = Σ r/√k, e não do deviance somado.
+
+| | M3 (deviance v0) | M5 mid-p (default) | M5 corrigido (q̂ + φ̂ por faixa) |
+|---|---|---|---|
+| FWER S0, Poisson (R = 200 / 100) | 1.00 | 0.035 [0.017, 0.070] | 0.03 [0.01, 0.09] |
+| AUC S1 / S2 / S3 | 1.000 / 0.999 / 0.997 | 1.000 / 1.000 / 1.000 | 1.000 / 1.000 / 1.000 |
+| FWER com dispersão k = 10 / k = 1 | 1.00 / 1.00 | 0.54 / 1.00 | 0.09 / 0.04 |
+| FWER com Trend −0.05 (extra) | 1.00 | 1.00 | 0.01 |
+| FWER com drift por aresta σ = 0.15 (extra) | 1.00 | 0.75 | **0.99** |
+
+- **Critério desta ADR:** o ranking passa (AUC ≥ 0.97 em S1–S3 em todas as condições, depois do q̂). O FP ≤ α passa **só sob o gerador Poisson ou com as correções**, e **não passa com drift heterogêneo por aresta**, que nenhuma correção testada absorve.
+- **Burst (M6):** com sobredispersão forte, mesmo corrigido, o FWER fica em 0.29 (k = 3) e 0.77 (k = 1). O φ̂ corrige a variância, mas não a cauda direita.
+- **Q4 (arestas novas):** resolvida no M5/M6 pelo condicionamento no total. Aresta nova dá r finito e positivo.
+- **Limite estrutural:** o Stouffer dilui silêncios parciais por √k. Num nó de grau 18, zerar 10% das arestas dá poder 0.09 (Tarefa 5).
