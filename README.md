@@ -73,6 +73,7 @@ The engine is under refinement (audit of 2026-09-29). In short:
 - **What τ measures today.** τ(v) is leave-one-out: for each neighbor n, how much n's outgoing weight distribution changes if v is removed, averaged over the neighbors. That is counterfactual importance, not absence: a node that has already gone silent gets τ = 0. The `D(P_observed || P_expected)` formula below is the goal; there is no `P_expected` in the code yet.
 - **The divergence does not change the ranking.** In leave-one-out, JSD, Hellinger and KL are all increasing functions of p = w(n→v)/W_out(n) alone.
 - **Volume is ignored.** 1 event and 10,000 events in the same proportion give the same τ.
+- **Ingestion cost grows with the graph.** Each event deep-copies the overlay graph: ~1.2 ms/event at 1k events and ~7 ms/event at 20k events on ~1k nodes, end to end (see Performance). `AddEvent`'s ~131 ns is only the enqueue.
 - **Real-time alerts during warm-up.** `OnAnomaly` evaluates τ per event on the partial graph. While a source has only one target, that target gets τ = 1 (p = 1), so expect alerts while the graph warms up.
 
 Problems, IDs and the plan: [docs/refinement/BACKLOG.md](docs/refinement/BACKLOG.md).
@@ -680,7 +681,7 @@ Benchmarked on AMD Ryzen 5 3600:
 
 | Operation | Latency | Notes |
 |-----------|---------|-------|
-| AddEvent | ~131 ns/op | ~7.6M events/sec |
+| AddEvent | ~131 ns/op | enqueue only (channel send); processing is asynchronous |
 | Snapshot | ~157 ns/op | |
 | AnalyzeNode | ~1.2 us/op | |
 | Analyze (100 nodes) | ~475 us | |
@@ -692,6 +693,17 @@ Benchmarked on AMD Ryzen 5 3600:
 | TensionHistory.Push | ~5.9 ns/op | ring buffer |
 | FiedlerApprox (100 nodes) | ~348 us | Cheeger bound |
 | CheckAnomalies overhead | ~115 ns/op | per-event temporal tracking |
+
+End-to-end ingestion (`BenchmarkIngestEndToEnd`: build the engine, `AddEvent` × N with random source and target over ~1k nodes, then `Stop()` to drain), measured on a 4 vCPU container (Intel Xeon @ 2.80GHz), two runs each:
+
+| Events | Per event | Total | Memory per run |
+|--------|-----------|-------|----------------|
+| 1k | ~1.1–1.3 ms | ~1.2 s | ~0.5 GB |
+| 5k | ~4.0–4.1 ms | ~20 s | ~6.8 GB |
+| 20k | ~7.2–7.3 ms | ~146 s | ~43 GB |
+| 50k | ~6.6–6.9 ms | ~336 s | ~107 GB |
+
+The cost per event grows with the graph because every event deep-copies the current overlay graph (F1 in the backlog); it levels off past 10k events because compaction (default: every 10k events) empties the overlay. About 64% of the CPU time is in `deepCopyGraph` and most of the rest is GC.
 
 ## License
 

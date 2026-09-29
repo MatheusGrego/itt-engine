@@ -3,6 +3,7 @@ package itt
 import (
 	"context"
 	"fmt"
+	"math/rand/v2"
 	"testing"
 	"time"
 
@@ -25,6 +26,52 @@ func BenchmarkAddEvent(b *testing.B) {
 
 	// Wait for processing
 	time.Sleep(200 * time.Millisecond)
+}
+
+// BenchmarkIngestEndToEnd measures ingestion including processing (B4): each
+// iteration builds an engine, submits N events over ~1k nodes and calls Stop,
+// which drains the queue. BenchmarkAddEvent above only times the channel send.
+// The full run takes several minutes; -short skips the sizes above 5k.
+func BenchmarkIngestEndToEnd(b *testing.B) {
+	const nodes = 1000
+	for _, n := range []int{1000, 5000, 20000, 50000} {
+		events := randomEvents(n, nodes, 42)
+		b.Run(fmt.Sprintf("events=%d", n), func(b *testing.B) {
+			if testing.Short() && n > 5000 {
+				b.Skip("skipped in -short mode")
+			}
+			for i := 0; i < b.N; i++ {
+				e, _ := NewBuilder().Build()
+				for _, ev := range events {
+					e.AddEvent(ev)
+				}
+				e.Stop()
+			}
+			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*n), "ns/event")
+		})
+	}
+}
+
+// randomEvents returns n events with uniform random source and target
+// (no self-loops) over the given number of nodes, from a fixed seed.
+func randomEvents(n, nodes int, seed uint64) []Event {
+	rng := rand.New(rand.NewPCG(seed, seed))
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	events := make([]Event, n)
+	for i := range events {
+		src := rng.IntN(nodes)
+		dst := rng.IntN(nodes - 1)
+		if dst >= src {
+			dst++
+		}
+		events[i] = Event{
+			Source:    fmt.Sprintf("n%d", src),
+			Target:    fmt.Sprintf("n%d", dst),
+			Weight:    1,
+			Timestamp: base.Add(time.Duration(i) * time.Millisecond),
+		}
+	}
+	return events
 }
 
 func BenchmarkSnapshot(b *testing.B) {
